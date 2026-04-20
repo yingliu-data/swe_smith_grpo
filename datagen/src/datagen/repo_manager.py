@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -68,11 +69,22 @@ class RepoManager:
         url = f"{GITHUB_API}/search/issues"
         out: list[PullRequestInfo] = []
         page = 1
+        auth_mode = "authenticated" if self._token else "ANONYMOUS (10 req/min)"
+        print(f"[datagen] list_bug_prs: repo={repo} labels={labels} auth={auth_mode}", file=sys.stderr, flush=True)
         async with httpx.AsyncClient(timeout=30.0, headers=headers, follow_redirects=True) as client:
             while len(out) < limit:
                 resp = await client.get(url, params={"q": query, "per_page": 50, "page": page})
+                body = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {}
+                print(
+                    f"[datagen] search page={page} status={resp.status_code} "
+                    f"total_count={body.get('total_count')} items={len(body.get('items', []))} "
+                    f"message={body.get('message')!r} "
+                    f"rate_remaining={resp.headers.get('x-ratelimit-remaining')} "
+                    f"rate_reset={resp.headers.get('x-ratelimit-reset')}",
+                    file=sys.stderr, flush=True,
+                )
                 resp.raise_for_status()
-                items = resp.json().get("items", [])
+                items = body.get("items", [])
                 if not items:
                     break
                 for item in items:
