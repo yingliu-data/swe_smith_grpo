@@ -8,16 +8,20 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        python3.12 \
-        python3.12-venv \
-        python3-pip \
-        git \
-        build-essential \
+        software-properties-common \
         ca-certificates \
         curl \
+        gnupg \
+    && add-apt-repository -y ppa:deadsnakes/ppa \
+    && apt-get update && apt-get install -y --no-install-recommends \
+        python3.12 \
+        python3.12-venv \
+        git \
+        build-essential \
         docker.io \
     && rm -rf /var/lib/apt/lists/* \
-    && ln -sf /usr/bin/python3.12 /usr/local/bin/python
+    && ln -sf /usr/bin/python3.12 /usr/local/bin/python \
+    && ln -sf /usr/bin/python3.12 /usr/local/bin/python3
 
 COPY --from=ghcr.io/astral-sh/uv:0.5 /uv /usr/local/bin/uv
 
