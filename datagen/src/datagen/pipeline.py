@@ -43,6 +43,14 @@ class Pipeline:
         repo_dir = await self._repo_manager.ensure_clone(cfg.repo)
         prs = await self._repo_manager.list_bug_prs(cfg.repo, limit=cfg.max_prs or 25)
         self._trace.log("datagen.prs_enumerated", repo=cfg.repo, n_prs=len(prs))
+        if not prs:
+            # Surface this immediately — silent n_prs=0 is indistinguishable from success
+            # in stderr breadcrumbs, and it caused a full pod crash-loop before.
+            raise RuntimeError(
+                f"PR enumeration returned 0 matches for {cfg.repo}. "
+                "Likely causes: bad label filter, GitHub rate limit (set GITHUB_TOKEN), "
+                "or the repo has no merged PRs with the configured labels."
+            )
 
         nebius: NebiusClient | None = None
         methods: dict[str, BaseMutationMethod] = {}

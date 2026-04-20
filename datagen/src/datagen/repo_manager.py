@@ -63,7 +63,7 @@ class RepoManager:
             f"repo:{repo}",
             "is:pr",
             "is:merged",
-            " ".join(f"label:{l}" for l in labels),
+            f"label:{','.join(labels)}",
         ])
         url = f"{GITHUB_API}/search/issues"
         out: list[PullRequestInfo] = []
