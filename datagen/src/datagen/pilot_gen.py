@@ -30,6 +30,7 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--max-prs", type=int, default=None)
     p.add_argument("--output-root", type=Path, default=Path("/workspace/datasets/pilot"))
     p.add_argument("--repos-root", type=Path, default=Path("/workspace/repos"))
+    p.add_argument("--sessions-root", type=Path, default=Path("/workspace/sessions"))
     p.add_argument("--offline", action="store_true", help="skip Nebius; only procedural+pr_mirror run")
     p.add_argument("--dry-run", action="store_true", help="stub PR enumeration; just verify wiring")
     return p.parse_args()
@@ -76,7 +77,8 @@ def main() -> None:
         repo=args.repo, t_per_method=args.t_per_method,
         llm_concurrency=args.llm_concurrency, docker_concurrency=args.docker_concurrency,
         heldout_count=args.heldout, output_root=args.output_root,
-        repos_root=args.repos_root, harbor_root=args.output_root / "harbor",
+        repos_root=args.repos_root, sessions_root=args.sessions_root,
+        harbor_root=args.output_root / "harbor",
         offline=args.offline, dry_run=args.dry_run, max_prs=args.max_prs,
     )
     try:
