@@ -68,7 +68,7 @@ class RepoManager:
         url = f"{GITHUB_API}/search/issues"
         out: list[PullRequestInfo] = []
         page = 1
-        async with httpx.AsyncClient(timeout=30.0, headers=headers) as client:
+        async with httpx.AsyncClient(timeout=30.0, headers=headers, follow_redirects=True) as client:
             while len(out) < limit:
                 resp = await client.get(url, params={"q": query, "per_page": 50, "page": page})
                 resp.raise_for_status()
@@ -107,7 +107,7 @@ class RepoManager:
         headers = {"Accept": "application/vnd.github.v3.patch"}
         if self._token:
             headers["Authorization"] = f"Bearer {self._token}"
-        async with httpx.AsyncClient(timeout=60.0, headers=headers) as client:
+        async with httpx.AsyncClient(timeout=60.0, headers=headers, follow_redirects=True) as client:
             resp = await client.get(pr.patch_url)
             resp.raise_for_status()
             return resp.text
