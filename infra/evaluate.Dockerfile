@@ -32,6 +32,6 @@ COPY common/ /app/common/
 COPY evaluation/ /app/evaluation/
 
 WORKDIR /app/evaluation
-RUN uv sync --frozen --extra gpu
+RUN uv sync --extra gpu
 
 ENTRYPOINT ["uv", "run", "evaluate"]

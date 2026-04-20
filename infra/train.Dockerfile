@@ -34,7 +34,9 @@ COPY training/ /app/training/
 
 WORKDIR /app/training
 # GPU extras pull in torch/vllm/peft; flash-attn-3 is compiled at first import.
-RUN uv sync --frozen --extra gpu
+# No --frozen: CUDA/vllm/flash-attn wheels are Linux-only, so resolution happens
+# at build time (macOS cannot produce a lockfile that covers these wheels).
+RUN uv sync --extra gpu
 
 # Trainer CLI. Wrapped by infra/run_train.sh supervisor loop in production.
 ENTRYPOINT ["uv", "run", "train"]
