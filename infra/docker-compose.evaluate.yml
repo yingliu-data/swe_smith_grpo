@@ -1,0 +1,40 @@
+version: "3.9"
+
+# Pod B — post-training eval (run after `docker-compose.train.yml` tears down).
+# Re-launches vLLM internally with prefix caching on and temperature=0.
+
+services:
+  evaluate:
+    build:
+      context: ..
+      dockerfile: infra/evaluate.Dockerfile
+    image: ml-systems/evaluate:latest
+    container_name: ml-evaluate
+    restart: "no"
+    ipc: host
+    privileged: true
+    environment:
+      - HF_HOME=/workspace/hf-cache
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - /workspace:/workspace
+      - /var/run/docker.sock:/var/run/docker.sock
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    shm_size: "8gb"
+    command:
+      - "--checkpoint"
+      - "/workspace/checkpoints/final"
+      - "--swebench-n"
+      - "20"
+      - "--heldout"
+      - "/workspace/datasets/pilot/heldout.jsonl"
+      - "--heldout-n"
+      - "10"
+      - "--sessions-root"
+      - "/workspace/sessions"

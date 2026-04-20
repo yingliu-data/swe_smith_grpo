@@ -1,0 +1,45 @@
+version: "3.9"
+
+# Pod B — H100 training. Co-located vLLM + prime-rl.
+#
+# Requires RunPod pod launched with --privileged and host docker socket
+# bind-mounted; see infra/runpod-notes.md.
+
+services:
+  train:
+    build:
+      context: ..
+      dockerfile: infra/train.Dockerfile
+    image: ml-systems/train:latest
+    container_name: ml-train
+    restart: on-failure
+    ipc: host
+    privileged: true
+    # prime-rl spawns per-rollout Docker containers via the host socket, so the
+    # socket is bind-mounted and the container runs privileged.
+    environment:
+      - HF_HOME=/workspace/hf-cache
+      - WANDB_MODE=offline
+      - WANDB_DIR=/workspace/logs/wandb
+      - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - /workspace:/workspace
+      - /var/run/docker.sock:/var/run/docker.sock
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    shm_size: "16gb"
+    command:
+      - "--dataset"
+      - "/workspace/datasets/pilot/pilot.jsonl"
+      - "--profile"
+      - "smoke"
+      - "--output-dir"
+      - "/workspace/checkpoints"
+      - "--sessions-root"
+      - "/workspace/sessions"

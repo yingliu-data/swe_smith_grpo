@@ -1,0 +1,30 @@
+version: "3.9"
+
+# Pod A — CPU datagen.
+# Volume at /workspace persists across the Pod A → Pod B handoff (RunPod
+# Network Volume re-attached to Pod B).
+
+services:
+  datagen:
+    build:
+      context: ..
+      dockerfile: infra/datagen.Dockerfile
+    image: ml-systems/datagen:latest
+    container_name: ml-datagen
+    environment:
+      - NEBIUS_API_KEY=${NEBIUS_API_KEY}
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - /workspace:/workspace
+      # docker.sock so the `docker save` step at the end of the pipeline can
+      # write the per-repo image tarballs to /workspace/docker-cache/.
+      - /var/run/docker.sock:/var/run/docker.sock
+    working_dir: /app/datagen
+    command:
+      - "--repo"
+      - "fastapi/fastapi"
+      - "--t"
+      - "15"
+      - "--output-dir"
+      - "/workspace/datasets/pilot"

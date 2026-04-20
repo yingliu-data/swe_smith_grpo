@@ -1,0 +1,32 @@
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+.env
+.DS_Store
+
+# Pipeline artefacts — live on the network volume at /workspace, not in repo
+datagen/output/
+/workspace/
+workspace/
+checkpoints/
+logs/
+wandb/
+*.tar.gz
+eval/results/
+
+# Editors
+.idea/
+.vscode/
+*.swp
+
+# uv
+*.lock.backup
+
+# Historical scratch space
+_old/

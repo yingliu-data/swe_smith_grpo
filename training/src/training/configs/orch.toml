@@ -1,0 +1,19 @@
+[orch]
+group_size_g = 4
+prompt_batch_size = 16
+dataset_shuffle_seed = 42
+
+[concurrency]
+llm_concurrency = 8
+docker_concurrency = 4
+
+[rollout]
+max_tool_calls = 20
+max_wall_seconds = 120
+max_tokens = 16384
+
+[env]
+module = "training.swe_env"
+class = "SWEAgentEnv"
+docker_image = "ml-systems/rollout:latest"
+workspace_root = "/workspace"
