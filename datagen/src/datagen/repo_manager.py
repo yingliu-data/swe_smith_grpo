@@ -94,6 +94,7 @@ class RepoManager:
                         if len(out) >= limit:
                             break
                 page += 1
+        print(f"[datagen] list_bug_prs complete: {len(out)} PRs enumerated", file=sys.stderr, flush=True)
         return out
 
     async def _fetch_pr(

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import random
+import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -40,7 +41,9 @@ class Pipeline:
 
     async def run(self) -> list[InstanceRecord]:
         cfg = self._cfg
+        print(f"[datagen] ensuring clone of {cfg.repo}", file=sys.stderr, flush=True)
         repo_dir = await self._repo_manager.ensure_clone(cfg.repo)
+        print(f"[datagen] clone ready at {repo_dir}; enumerating PRs", file=sys.stderr, flush=True)
         prs = await self._repo_manager.list_bug_prs(cfg.repo, limit=cfg.max_prs or 25)
         self._trace.log("datagen.prs_enumerated", repo=cfg.repo, n_prs=len(prs))
         if not prs:
@@ -71,7 +74,9 @@ class Pipeline:
 
         try:
             tasks: list[asyncio.Task[Any]] = []
-            for pr in prs:
+            print(f"[datagen] fetching patches for {len(prs)} PRs x {len(methods)} methods x {cfg.t_per_method} trials", file=sys.stderr, flush=True)
+            for i, pr in enumerate(prs, 1):
+                print(f"[datagen] PR {i}/{len(prs)}: #{pr.number} base={pr.base_commit[:8]}", file=sys.stderr, flush=True)
                 patch = await self._repo_manager.fetch_patch(pr)
                 await self._repo_manager.checkout(repo_dir, pr.base_commit)
                 for name, method in methods.items():
@@ -84,7 +89,9 @@ class Pipeline:
                                 passing=passing,
                             )
                         ))
+            print(f"[datagen] scheduled {len(tasks)} tasks; awaiting gather (LLM+docker)", file=sys.stderr, flush=True)
             await asyncio.gather(*tasks, return_exceptions=True)
+            print(f"[datagen] gather complete: passing={len(passing)}", file=sys.stderr, flush=True)
         finally:
             if nebius is not None:
                 await nebius.close()
