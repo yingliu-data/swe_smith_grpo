@@ -4,6 +4,10 @@
 
 FROM python:3.12-slim
 
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
 # System deps: git (repo cloning), build-essential (for some wheels),
 # docker-cli (datagen calls `docker save` to pre-bake per-repo images).
 RUN apt-get update && apt-get install -y --no-install-recommends \
