@@ -13,7 +13,8 @@ NEBIUS_MODEL = "Qwen/Qwen3-30B-A3B-Instruct-2507"
 @dataclass(slots=True)
 class DatagenConfig:
     repo: str = "fastapi/fastapi"
-    t_per_method: int = 15
+    t_per_method: int = 5
+    base: bool = True
     validation_timeout_seconds: int = 120
     llm_concurrency: int = 8
     docker_concurrency: int = 4

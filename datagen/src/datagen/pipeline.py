@@ -44,7 +44,7 @@ class Pipeline:
         print(f"[datagen] ensuring clone of {cfg.repo}", file=sys.stderr, flush=True)
         repo_dir = await self._repo_manager.ensure_clone(cfg.repo)
         print(f"[datagen] clone ready at {repo_dir}; enumerating PRs", file=sys.stderr, flush=True)
-        prs = await self._repo_manager.list_bug_prs(cfg.repo, limit=cfg.max_prs or 25)
+        prs = await self._repo_manager.list_bug_prs(cfg.repo, limit=cfg.max_prs or 5)
         self._trace.log("datagen.prs_enumerated", repo=cfg.repo, n_prs=len(prs))
         if not prs:
             # Surface this immediately — silent n_prs=0 is indistinguishable from success
@@ -79,16 +79,39 @@ class Pipeline:
                 print(f"[datagen] PR {i}/{len(prs)}: #{pr.number} base={pr.base_commit[:8]}", file=sys.stderr, flush=True)
                 patch = await self._repo_manager.fetch_patch(pr)
                 await self._repo_manager.checkout(repo_dir, pr.base_commit)
-                for name, method in methods.items():
-                    for t in range(cfg.t_per_method):
-                        tasks.append(asyncio.create_task(
-                            self._generate_validate_write(
-                                pr=pr, repo_dir=repo_dir, reference_patch=patch,
-                                method=method, trial=t, stats=stats[name],
-                                jsonl=jsonl_writer, harbor=harbor_writer, memory=memory,
-                                passing=passing,
-                            )
-                        ))
+                if cfg.base:
+                    if not any(l in {"bug", "fix"} for l in pr.labels):
+                        continue
+                    src_patch, test_patch = split_reference_patch(patch)
+                    f2p = extract_f2p_nodeids(test_patch)
+                    if not src_patch.strip() or not test_patch.strip() or not f2p:
+                        continue
+                    instance_id = f"{cfg.repo.replace('/', '__')}-{pr.number}-base"
+                    rec = InstanceRecord(
+                        instance_id=instance_id,
+                        repo=cfg.repo,
+                        base_commit=pr.base_commit,
+                        problem_statement=f"# {pr.title}\n\n{(pr.body or '').strip()}",
+                        patch=src_patch,
+                        test_patch=test_patch,
+                        FAIL_TO_PASS=f2p,
+                        PASS_TO_PASS=[],
+                        created_at=datetime.now(timezone.utc).isoformat(),
+                        metadata={"method": "base", "pr": pr.number},
+                    )
+                    harbor_writer.write(rec, ["python", "-m", "pytest", "-x", "--tb=short", *f2p])
+                    passing.append((rec, f2p))
+                else:
+                    for name, method in methods.items():
+                        for t in range(cfg.t_per_method):
+                            tasks.append(asyncio.create_task(
+                                self._generate_validate_write(
+                                    pr=pr, repo_dir=repo_dir, reference_patch=patch,
+                                    method=method, trial=t, stats=stats[name],
+                                    jsonl=jsonl_writer, harbor=harbor_writer, memory=memory,
+                                    passing=passing,
+                                )
+                            ))
             print(f"[datagen] scheduled {len(tasks)} tasks; awaiting gather (LLM+docker)", file=sys.stderr, flush=True)
             await asyncio.gather(*tasks, return_exceptions=True)
             print(f"[datagen] gather complete: passing={len(passing)}", file=sys.stderr, flush=True)
@@ -158,7 +181,8 @@ class Pipeline:
             )
         stats.wall_total += result.wall_seconds
         self._trace.log("datagen.validate", method=method.name, pr=pr.number, trial=trial,
-                        passed=result.passed, reason=result.reason, wall=result.wall_seconds)
+                        passed=result.passed, reason=result.reason, wall=result.wall_seconds,
+                        diag=result.diag)
         if not result.passed:
             return
         stats.passed += 1
