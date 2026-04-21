@@ -49,8 +49,9 @@ RUN UV_PROJECT=/opt/prime-rl uv pip install \
         -e /app/agent -e /app/common -e /app/training \
         aiodocker>=0.24 aiofiles>=24.1
 
-# train.py shells out to `$PRIME_RL_CMD ...`; point it at prime-rl's venv.
-ENV PRIME_RL_CMD="uv --project /opt/prime-rl run rl"
+# train.py shells out to `$PRIME_RL_CMD ...`; invoke the baked console script
+# directly to skip `uv run`'s implicit sync/resolve (which needs network).
+ENV PRIME_RL_CMD="/opt/prime-rl/.venv/bin/rl"
 
 WORKDIR /app/training
 # Minimal sync for train.py itself (no gpu extras needed here — prime-rl's
