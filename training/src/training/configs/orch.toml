@@ -1,44 +1,37 @@
 # prime-rl v0.5.0 OrchestratorConfig
-# Loaded into RLConfig.orchestrator via `--orchestrator @orch.toml`.
-# Schema: src/prime_rl/configs/orchestrator.py  (see OrchestratorConfig).
+# Loaded via `--orchestrator @orch.toml`.  Schema: src/prime_rl/configs/orchestrator.py
+# See train.toml for cross-file invariants.
 
-batch_size = 16            # total rollouts per step
-rollouts_per_example = 4   # GRPO group size G — unique prompts = batch_size/G = 4
-# Must match trainer's model.seq_len (see configs/train.toml). Halved from
-# 16384 to fit activation memory on the RTX 5090; bump back up on H100.
-seq_len = 8192
-max_steps = 30
-max_async_level = 1
+batch_size           = 16   # total rollouts per step
+rollouts_per_example = 4    # GRPO group size G → unique prompts = 16 / 4 = 4
+seq_len              = 8192 # MUST equal train.model.seq_len
+max_steps            = 30
+max_async_level      = 1
 max_off_policy_steps = 16
-seed = 42
+seed                 = 42
 
 [model]
 name = "SWE-bench/SWE-agent-LM-7B"
 
 [sampling]
 temperature = 1.0
-max_tokens = 2048
+max_tokens  = 2048
 
 # ---------------------------------------------------------------------------
-# Training environment. prime-rl resolves `id` via `verifiers.load_environment`
-# (entry-point-registered names). Our custom SWEAgentEnv in
-# training/src/training/swe_env.py is NOT yet registered. Two working paths:
+# Training environment.
 #
-#   A) Register it: add to training/pyproject.toml
-#        [project.entry-points."verifiers.environments"]
-#        swe-agent-env = "training.swe_env:load_environment"
-#      and expose a `load_environment(**args) -> SWEAgentEnv` in swe_env.py.
+# verifiers.load_environment resolves `id` via importlib.import_module, NOT
+# entry-points: "swe-agent-env" → `import swe_agent_env` → call its
+# `load_environment(**args)`. The module lives at training/src/swe_agent_env/
+# and is installed editable into prime-rl's venv via training/pyproject.toml.
 #
-#   B) Use prime-rl's built-in (what examples/qwen30b_swe/rl.toml uses):
-#        id = "mini-swe-agent-plus"
-#        args = { max_turns = 20, cpu_cores = 2, memory_gb = 4, disk_size_gb = 4,
-#                 labels = ["mini-swe-agent-plus"], total_timeout_minutes = 120,
-#                 sandbox_client_max_workers = 64, max_command_timeouts = 3,
-#                 sandbox_command_timeout = 30 }
+# Rollouts run locally in the training container (no per-rollout Docker);
+# the legacy `docker_image` arg is accepted but ignored by load_environment.
+# Fallback for debugging: id = "mini-swe-agent-plus" (prime-rl built-in).
 # ---------------------------------------------------------------------------
 [[env]]
-id = "swe-agent-env"
-args = { dataset = "/workspace/datasets/pilot/pilot.jsonl", docker_image = "ml-systems/rollout:latest", workspace_root = "/workspace", max_tool_calls = 20, max_wall_seconds = 120 }
+id   = "swe-agent-env"
+args = { dataset = "/workspace/datasets/pilot/pilot.jsonl", max_tool_calls = 20 }
 
 [buffer]
 seed = 42

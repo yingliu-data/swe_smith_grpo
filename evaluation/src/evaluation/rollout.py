@@ -7,7 +7,7 @@ from typing import Any
 import httpx
 from tenacity import AsyncRetrying, retry_if_exception_type, stop_after_attempt, wait_exponential
 
-from agent import DockerEnvironment, TaskSpec
+from agent import AsyncLocalEnvironment, TaskSpec
 from common.reward import DefenseEvent, RewardResult, compute_reward
 from common.tool_surface import ToolSurfaceError, dispatch, parse_tool_call
 
@@ -76,7 +76,7 @@ async def run_single_rollout(
     instance: EvalInstance,
     cfg: EvalConfig,
     llm: VllmClient,
-    docker_sem: asyncio.Semaphore,
+    rollout_sem: asyncio.Semaphore,
 ) -> RolloutResult:
     task = TaskSpec(
         repository=instance.repo,
@@ -87,13 +87,18 @@ async def run_single_rollout(
         metadata={"instance_id": instance.instance_id, "source": instance.source,
                   "seed": cfg.seed},
     )
-    env = DockerEnvironment(
-        workspace_root=cfg.workspace_root,
-        image=cfg.rollout_image,
+    # Each rollout owns its own scratch dir under rollout_workspace_root, so
+    # parallel rollouts never collide on disk. Template repo is pre-mirrored
+    # into git_mirror_root by the evaluate.Dockerfile.
+    repo_slug = instance.repo.replace("/", "__")
+    per_rollout_cwd = cfg.rollout_workspace_root / f"{instance.instance_id}"
+    env = AsyncLocalEnvironment(
+        workspace_root=per_rollout_cwd,
+        template_path=cfg.git_mirror_root / repo_slug,
         task=task,
         command_timeout_seconds=cfg.max_wall_seconds,
     )
-    await env.prepare()
+    await env.prepare(test_patch=instance.test_patch)
 
     history: list[dict[str, str]] = [
         {"role": "system",
@@ -107,8 +112,6 @@ async def run_single_rollout(
     trajectory: list[dict[str, Any]] = []
     initial_head = await env.current_head()
     structural = [
-        DefenseEvent("network_none", True, "container network=none"),
-        DefenseEvent("test_mounts_readonly", True, "/workspace mounted :ro"),
         DefenseEvent("step_budget", True, f"<= {cfg.max_tool_calls} tool calls"),
     ]
 
@@ -127,7 +130,7 @@ async def run_single_rollout(
                 trajectory.append({"kind": "parse_error", "detail": str(exc)})
                 continue
 
-            async with docker_sem:
+            async with rollout_sem:
                 result = await dispatch(call, env)
             trajectory.append({
                 "kind": "tool", "name": call.name, "args": call.arguments,

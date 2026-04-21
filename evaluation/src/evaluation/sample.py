@@ -20,6 +20,9 @@ class EvalInstance:
     reference_patch: str | None = None
     fail_to_pass: list[str] | None = None
     pass_to_pass: list[str] | None = None
+    # SWE-bench-style test_patch that must be applied after checkout so the
+    # F2P test files exist on disk before the agent runs.
+    test_patch: str = ""
 
 
 def sample_swebench_verified(n: int, seed: int) -> list[EvalInstance]:
@@ -70,6 +73,7 @@ def _row_to_instance(row: dict, *, source: Source) -> EvalInstance:
         reference_patch=row.get("patch"),
         fail_to_pass=row.get("FAIL_TO_PASS") or row.get("fail_to_pass"),
         pass_to_pass=row.get("PASS_TO_PASS") or row.get("pass_to_pass"),
+        test_patch=row.get("test_patch") or "",
     )
 
 

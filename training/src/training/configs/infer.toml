@@ -1,26 +1,28 @@
 # prime-rl v0.5.0 InferenceConfig
-# Loaded into RLConfig.inference via `--inference @infer.toml`.
-# Schema: src/prime_rl/configs/inference.py  (see InferenceConfig).
+# Loaded via `--inference @infer.toml`.  Schema: src/prime_rl/configs/inference.py
+# See train.toml for cross-file invariants.
 #
-# Co-located with the trainer on a single H100: gpu_memory_utilization=0.45
-# leaves ~44 GB for the LoRA trainer. Requires CUDA_VISIBLE_DEVICES=0,0 in
-# docker-compose so prime-rl's launcher sees "two" GPUs (both mapping to
-# physical 0). See infra/docker-compose.train.yml.
+# Deployment: 1 GPU co-located via CUDA_VISIBLE_DEVICES="0,0".  Trainer and
+# vLLM share a single 32 GB 5090, so vLLM's fraction must leave enough HBM
+# for the trainer's weights, gradients, and activations.  0.45 is the
+# empirically validated ceiling for SWE-agent-LM-7B at seq_len=8192 with
+# LoRA rank-16 + ac=full.  Raise only if the trainer's peak allocation
+# drops (e.g., lower rank, smaller seq_len).
 
 gpu_memory_utilization = 0.45
-seed = 42
-# enable_lora / max_lora_rank are auto-set from trainer.model.lora by
-# RLConfig.auto_setup_lora — no need to duplicate here.
+seed                   = 42
+# enable_lora + max_lora_rank are auto-set from train.model.lora by
+# RLConfig.auto_setup_lora — don't duplicate here.
 
 [server]
 host = "0.0.0.0"
 port = 8000
 
 [model]
-name = "SWE-bench/SWE-agent-LM-7B"
-dtype = "bfloat16"
-max_model_len = 16384
-enforce_eager = false
+name           = "SWE-bench/SWE-agent-LM-7B"
+dtype          = "bfloat16"
+max_model_len  = 16384   # bounds generation budget only; trainer uses seq_len=8192.
+enforce_eager  = false
 
 [parallel]
 tp = 1

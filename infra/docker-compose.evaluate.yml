@@ -2,6 +2,8 @@ version: "3.9"
 
 # Pod B — post-training eval (run after `docker-compose.train.yml` tears down).
 # Re-launches vLLM internally with prefix caching on and temperature=0.
+# Rollouts run in-process via agent.AsyncLocalEnvironment — no docker-in-docker,
+# no privileged mode, no host socket bind mount.
 
 services:
   evaluate:
@@ -12,13 +14,11 @@ services:
     container_name: ml-evaluate
     restart: "no"
     ipc: host
-    privileged: true
     environment:
       - HF_HOME=/workspace/hf-cache
       - PYTHONUNBUFFERED=1
     volumes:
       - /workspace:/workspace
-      - /var/run/docker.sock:/var/run/docker.sock
     deploy:
       resources:
         reservations:

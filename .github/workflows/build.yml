@@ -29,8 +29,6 @@ jobs:
             dockerfile: infra/train.Dockerfile
           - name: evaluate
             dockerfile: infra/evaluate.Dockerfile
-          - name: rollout
-            dockerfile: infra/rollout.Dockerfile
     steps:
       - name: Checkout
         uses: actions/checkout@v4

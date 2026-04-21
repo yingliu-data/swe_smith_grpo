@@ -74,7 +74,7 @@ async def run_eval(
     )
 
     llm_sem = asyncio.Semaphore(cfg.llm_concurrency)
-    docker_sem = asyncio.Semaphore(cfg.docker_concurrency)
+    rollout_sem = asyncio.Semaphore(cfg.rollout_concurrency)
     llm = VllmClient(
         base_url=vllm_base_url,
         model=str(checkpoint),
@@ -94,7 +94,7 @@ async def run_eval(
             trace.log("eval.rollout.start", instance_id=inst.instance_id, source=inst.source)
             try:
                 res = await run_single_rollout(
-                    instance=inst, cfg=cfg, llm=llm, docker_sem=docker_sem,
+                    instance=inst, cfg=cfg, llm=llm, rollout_sem=rollout_sem,
                 )
             except Exception as exc:
                 trace.log("eval.rollout.error", instance_id=inst.instance_id, error=str(exc))

@@ -74,9 +74,11 @@ async def _run(args: argparse.Namespace) -> int:
     if args.resume:
         cmd += ["--ckpt.resume-step", "-1"]  # -1 = restart from latest checkpoint
 
+    subprocess_env = {**os.environ, "ML_SYSTEMS_SESSION": str(session.root)}
+    _pin_coloc_cuda_visible_devices(subprocess_env)
     proc = await asyncio.create_subprocess_exec(
         *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
-        env={**os.environ, "ML_SYSTEMS_SESSION": str(session.root)},
+        env=subprocess_env,
     )
     streamer = asyncio.create_task(_stream_to_trace(proc, log))
     watcher = asyncio.create_task(
@@ -129,6 +131,16 @@ def _resume_path(output_dir: Path, resume: str) -> Path:
             raise RuntimeError("no valid checkpoint found for --resume latest")
         return ckpt.path
     return output_dir / resume
+
+
+def _pin_coloc_cuda_visible_devices(env: dict[str, str]) -> None:
+    # RunPod rewrites CUDA_VISIBLE_DEVICES at pod start to match the
+    # assigned GPU count, overriding the image-level ENV. On a 1-GPU pod
+    # that leaves a single "0", and prime-rl's deployment check rejects
+    # num_train_gpus + num_infer_gpus > 1. Re-pin "0,0" in the subprocess
+    # env so the launcher sees two entries and co-locates both workers on
+    # the one physical card.
+    env["CUDA_VISIBLE_DEVICES"] = "0,0"
 
 
 def _prime_rl_missing(cmd_parts: list[str]) -> bool:

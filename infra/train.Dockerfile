@@ -1,4 +1,8 @@
-# Pod B — H100 trainer. Runs prime-rl + vLLM (co-located).
+# Pod B — 1-GPU co-located trainer. prime-rl + vLLM share a single 5090
+# via the CUDA_VISIBLE_DEVICES="0,0" alias: prime-rl's launcher asserts
+# num_train_gpus + num_infer_gpus ≤ len(physical_gpu_ids), and duplicating
+# device 0 in the list makes that check pass on a 1-GPU pod. Capacity
+# stopgap; the 2-GPU layout is the intended production topology.
 # CUDA 12.8 base matches prime-rl v0.5.0 pins (torch 2.10 cu128 / vLLM 0.14).
 
 FROM nvidia/cuda:12.8.1-devel-ubuntu22.04
@@ -19,7 +23,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         python3.12-dev \
         git \
         build-essential \
-        docker.io \
     && rm -rf /var/lib/apt/lists/* \
     && ln -sf /usr/bin/python3.12 /usr/local/bin/python \
     && ln -sf /usr/bin/python3.12 /usr/local/bin/python3
@@ -62,6 +65,24 @@ RUN UV_PROJECT=/opt/prime-rl uv pip install \
 # check *after* the overlay install catches regressions from either step.
 RUN /opt/prime-rl/.venv/bin/python -c "import flash_attn, ring_flash_attn; print(f'flash_attn {flash_attn.__version__}')"
 
+# ---------------------------------------------------------------------------
+# Rollouts run locally in this container (no per-rollout Docker). Bake the
+# target repo + its test deps into the prime-rl venv so `evaluate` can just
+# shell `python -m pytest` with cwd=<per-rollout worktree>. Each rollout
+# copies from /opt/repo-cache/fastapi into /tmp/rollout-workspace/current
+# via shutil.copytree (see agent/src/agent/async_local_env.py::prepare).
+# ---------------------------------------------------------------------------
+RUN git clone https://github.com/fastapi/fastapi.git /opt/repo-cache/fastapi
+RUN /opt/prime-rl/.venv/bin/pip install \
+        -e /opt/repo-cache/fastapi \
+        pytest pytest-asyncio anyio httpx dirty-equals
+
+# Import-check: verifiers resolves `swe-agent-env` via importlib.import_module,
+# so the module must be at the top level of prime-rl's venv. Fail the build if
+# hatch didn't ship src/swe_agent_env (pyproject.toml [tool.hatch.build...]).
+RUN /opt/prime-rl/.venv/bin/python -c \
+    "import swe_agent_env; assert callable(swe_agent_env.load_environment)"
+
 # train.py shells out to `$PRIME_RL_CMD ...`; invoke the baked console script
 # directly to skip `uv run`'s implicit sync/resolve (which needs network).
 ENV PRIME_RL_CMD="/opt/prime-rl/.venv/bin/rl"
@@ -69,13 +90,11 @@ ENV PRIME_RL_CMD="/opt/prime-rl/.venv/bin/rl"
 # venv's bin must be on PATH. `uv run train` only activates /app/training's
 # venv, which doesn't carry torch/torchrun.
 ENV PATH="/opt/prime-rl/.venv/bin:${PATH}"
-
-# 1-GPU co-location (Pod B): prime-rl's deployment check requires
-# num_train_gpus + num_infer_gpus = 2 physical devices. Listing device 0 twice
-# maps both logical slots to the same GPU; vLLM is capped at
-# gpu_memory_utilization=0.45 (see configs/infer.toml) leaving the rest for
-# the LoRA trainer. docker-compose.train.yml sets the same value for local
-# dev; baking it here covers direct `runpodctl pod create` launches.
+# Co-location alias: one physical GPU masqueraded as two entries so
+# prime-rl's deployment check passes. RunPod often resets this at pod
+# start based on the GPU-count assigned, so train.py re-pins it in the
+# subprocess env; this ENV is the baseline for anyone running the image
+# outside the training entrypoint (e.g. an exec shell).
 ENV CUDA_VISIBLE_DEVICES="0,0"
 
 WORKDIR /app/training

@@ -1,50 +1,50 @@
 # prime-rl v0.5.0 TrainerConfig
-# Loaded into RLConfig.trainer via `--trainer @train.toml`.
-# Schema: src/prime_rl/configs/trainer.py  (see TrainerConfig).
+# Loaded via `--trainer @train.toml`.  Schema: src/prime_rl/configs/trainer.py
+#
+# Cross-file invariants (train.toml / orch.toml / infer.toml must agree):
+#   - [model].name                        — identical in all three.
+#   - [model].seq_len == orch.seq_len     — hard requirement.
+#     infer.max_model_len may be larger (it bounds generation only), but keep
+#     it ≥ training seq_len or rollouts truncate.
+#   - [model.lora] → inference enable_lora / max_lora_rank are auto-set by
+#     RLConfig.auto_setup_lora; don't duplicate in infer.toml.
 
 max_steps = 30
 max_async_level = 1
-# Move optimizer state to host DRAM to free HBM on the 32 GB RTX 5090. Pairs
-# with fsdp_cpu_offload below; both are required to fit 7B + LoRA + vLLM
-# co-located on a single Blackwell card.
-optim_cpu_offload = true
 
 [model]
-name = "SWE-bench/SWE-agent-LM-7B"
-# 8192 instead of 16384: activation memory is O(seq_len) per layer, so halving
-# here is the single largest saving before considering checkpointing. Must
-# match orch.toml's seq_len; vLLM's max_model_len in infer.toml may be larger
-# (only bounds generation budget) but keep them aligned to avoid confusion.
-seq_len = 8192
-# `dtype` does not exist on TrainerModelConfig — live mixed precision is
-# controlled via `optimization_dtype` / `reduce_dtype` (both default fp32).
-# Recompute activations on the backward pass. `full` = every transformer
-# block (freq=1). Trades ~30% compute for a large activation-memory cut; on
-# a 32 GB 5090 with a co-located 7B vLLM this is load-bearing, not optional.
+name    = "SWE-bench/SWE-agent-LM-7B"
+seq_len = 8192   # halved from 16384 to fit activation memory on 32 GB RTX 5090.
+
+# Activation checkpointing: recompute every transformer block on the backward
+# pass.  ~30% compute tax for a large activation-memory cut.  Load-bearing on
+# the 5090, not optional.  Pure GPU recompute — no host offload.
 ac = { mode = "full", freq = 1 }
-# Offload checkpointed activations to pinned host memory between fwd/bwd.
-# Small additional saving on top of `ac`; pin_memory=true keeps DMA fast.
-ac_offloading = { pin_memory = true }
-# Shard optimizer + grads + params to CPU when idle. Adds PCIe traffic per
-# step but unblocks the 5090 fit; remove on H100 where HBM isn't the gate.
-fsdp_cpu_offload = true
+
+# Deliberately NOT set (user policy — avoid PCIe offload stalls):
+#   fsdp_cpu_offload, optim_cpu_offload, ac_offloading
+# LoRA (~0.3% trainable) + ac=full + seq_len=8192 is expected to fit natively.
+# If this OOMs, drop seq_len to 4096 first, then LoRA rank 16 → 8.
+#
+# `dtype` is NOT a TrainerModelConfig field; mixed precision is controlled
+# via optimization_dtype / reduce_dtype (both default fp32).
 
 [model.lora]
-rank = 16
-alpha = 32
+rank           = 16
+alpha          = 32
 target_modules = ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
 
 [optim]
-type = "adamw"
-lr = 1e-6
+type         = "adamw"
+lr           = 1e-6
 weight_decay = 0.01
-max_norm = 0.05      # grad clip
+max_norm     = 0.05   # grad clip
 
 [scheduler]
 type = "constant"
 
-# [loss] omitted → defaults to DefaultLossConfig (prime-rl's GRPO-style loss).
+# [loss] omitted → DefaultLossConfig (prime-rl's GRPO-style loss).
 
 [ckpt]
-interval = 10
+interval  = 10
 keep_last = 3

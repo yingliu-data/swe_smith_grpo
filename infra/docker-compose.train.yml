@@ -1,9 +1,14 @@
 version: "3.9"
 
-# Pod B — rtx 5090 training. Co-located vLLM + prime-rl.
+# Pod B — 1-GPU co-located training. prime-rl trainer + vLLM inference
+# share a single 5090 via the CUDA_VISIBLE_DEVICES="0,0" alias (prime-rl's
+# launcher otherwise refuses: num_train_gpus + num_infer_gpus = 2 > 1
+# physical card). The 2-GPU dedicated layout is the intended production
+# topology; this is the capacity-constrained stopgap.
 #
-# Requires RunPod pod launched with --privileged and host docker socket
-# bind-mounted; see infra/runpod-notes.md.
+# Rollouts run inside this container (sequential, asyncio.Lock-serialised)
+# via agent.AsyncLocalEnvironment — no docker-in-docker, no privileged mode,
+# no host socket bind mount.
 
 services:
   train:
@@ -14,23 +19,15 @@ services:
     container_name: ml-train
     restart: "no"
     ipc: host
-    privileged: true
-    # prime-rl spawns per-rollout Docker containers via the host socket, so the
-    # socket is bind-mounted and the container runs privileged.
     environment:
+      - CUDA_VISIBLE_DEVICES=0,0
       - HF_HOME=/workspace/hf-cache
       - WANDB_MODE=offline
       - WANDB_DIR=/workspace/logs/wandb
       - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
       - PYTHONUNBUFFERED=1
-      # 1-H100 co-location: prime-rl's launcher needs to see num_train_gpus +
-      # num_infer_gpus = 2 devices. Listing GPU 0 twice maps both slots to the
-      # same physical GPU; vLLM caps at gpu_memory_utilization=0.45, leaving
-      # the rest for the LoRA trainer.
-      - CUDA_VISIBLE_DEVICES=0,0
     volumes:
       - /workspace:/workspace
-      - /var/run/docker.sock:/var/run/docker.sock
     deploy:
       resources:
         reservations:
