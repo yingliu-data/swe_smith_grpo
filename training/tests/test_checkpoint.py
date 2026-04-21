@@ -4,9 +4,6 @@ Three properties exercised:
   1. Save → corrupt → verify detects the tamper (Manifest integrity).
   2. latest_valid() returns the newest healthy checkpoint, skipping corrupted ones.
   3. prune_old() keeps exactly `keep_last` and deletes older.
-  4. Trajectory-hash equality across a simulated kill/resume: the same seed +
-     same prompt + same step transcript hash to the exact same sha256. This is
-     the property that the kill-test at step 12 asserts on real rollouts.
 """
 from __future__ import annotations
 
@@ -16,7 +13,6 @@ from pathlib import Path
 import pytest
 
 from training.checkpoint import CHECKPOINT_FILES, Checkpoint, latest_valid, list_checkpoints, prune_old
-from training.swe_env import Trajectory
 
 
 def _make_ckpt(root: Path, step: int, adapter_bytes: bytes = b"lora-weights") -> Path:
@@ -116,47 +112,3 @@ def test_prune_old_noop_when_under_limit(tmp_path):
         _make_ckpt(tmp_path, step=s)
     pruned = prune_old(tmp_path, keep_last=3)
     assert pruned == []
-
-
-# ---------------------------------------------------------------------------
-# Trajectory-hash equality (the kill/resume determinism contract)
-# ---------------------------------------------------------------------------
-
-def test_trajectory_hash_is_deterministic_across_reconstructions():
-    """Same prompt_id + same rollout_idx + same step transcript + same heads
-    must produce the same sha256. If this property breaks, the kill-test at
-    step 12 would false-positive *every time*; this unit test guards the
-    invariant locally so it's obvious what changed."""
-    steps = [
-        {"kind": "tool", "name": "read_file", "args": {"path": "src/x.py"}, "ok": True, "exit_code": 0},
-        {"kind": "tool", "name": "edit_file", "args": {"path": "src/x.py", "patch": "+a"}, "ok": True, "exit_code": 0},
-        {"kind": "tool", "name": "evaluate", "args": {}, "ok": True, "exit_code": 0},
-    ]
-    a = Trajectory(prompt_id="p1", rollout_idx=0, steps=list(steps),
-                   initial_head="HEAD", final_head="HEAD", final_diff="+a")
-    b = Trajectory(prompt_id="p1", rollout_idx=0, steps=list(steps),
-                   initial_head="HEAD", final_head="HEAD", final_diff="+a")
-    assert a.hash() == b.hash()
-
-
-def test_trajectory_hash_differs_on_step_change():
-    base = Trajectory(
-        prompt_id="p1", rollout_idx=0,
-        steps=[{"kind": "tool", "name": "read_file", "args": {"path": "a"}}],
-        initial_head="H", final_head="H", final_diff="",
-    )
-    variant = Trajectory(
-        prompt_id="p1", rollout_idx=0,
-        steps=[{"kind": "tool", "name": "read_file", "args": {"path": "b"}}],
-        initial_head="H", final_head="H", final_diff="",
-    )
-    assert base.hash() != variant.hash()
-
-
-def test_trajectory_hash_differs_on_rollout_idx():
-    steps = [{"kind": "tool", "name": "read_file", "args": {"path": "a"}}]
-    a = Trajectory(prompt_id="p1", rollout_idx=0, steps=steps,
-                   initial_head="H", final_head="H", final_diff="")
-    b = Trajectory(prompt_id="p1", rollout_idx=1, steps=steps,
-                   initial_head="H", final_head="H", final_diff="")
-    assert a.hash() != b.hash()

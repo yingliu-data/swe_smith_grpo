@@ -45,7 +45,8 @@ RUN uv sync --extra flash-attn
 
 # ---------------------------------------------------------------------------
 # Our training/agent/common packages are installed editable into prime-rl's
-# venv, so `uv run rl --env training.swe_env:SWEAgentEnv` can import them.
+# venv so verifiers' importlib-based discovery finds `swe_agent_env` when
+# orch.toml names `id = "swe-agent-env"`.
 # ---------------------------------------------------------------------------
 WORKDIR /app
 COPY agent/    /app/agent/

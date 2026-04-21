@@ -52,19 +52,11 @@ Each per-eval defense has a failing-fixture unit test in
 
 ## GRPO correctness — group failure
 
-`training/src/training/swe_env.py::run_group` uses
-`asyncio.gather(..., return_exceptions=True)` and raises `GroupFailure` if any
-rollout in the group fails. **Missing rollouts poison group-relative
-advantage** — discarding the whole group is the GRPO-correct move, not
-fire-and-forget.
-
-## Kill-test (step 12)
-
-The hard resume property this project asserts is: *the rollout trajectory
-hash for steps 11 and 12 is byte-identical pre-kill and post-resume*. That
-proves seed determinism is preserved across disk load, not just mechanical
-checkpoint restoration. See `infra/runpod-notes.md` §Kill-test procedure and
-the unit-test guard `training/tests/test_checkpoint.py::test_trajectory_hash_*`.
+Prime-rl / verifiers drives G parallel rollouts and handles group-failure
+semantics internally; missing rollouts poison group-relative advantage, so
+the whole group gets discarded rather than fire-and-forget. Our
+`SWEAgentEnv` (in `training/src/swe_agent_env/__init__.py`) propagates
+rollout exceptions up to the verifiers orchestrator unchanged.
 
 ## Run
 
