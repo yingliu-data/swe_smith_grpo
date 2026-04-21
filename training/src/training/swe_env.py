@@ -60,15 +60,15 @@ class SWEAgentEnv(_MultiTurnEnv):
       - network=none on container (infra-level); read-only mounts on tests/
     """
 
-    MAX_TOOL_CALLS = 20
-
     def __init__(self, *, docker_image: str, workspace_root: str,
-                 docker_sem: asyncio.Semaphore, seed: int = 42):
+                 docker_sem: asyncio.Semaphore, seed: int = 42,
+                 max_tool_calls: int = 20):
         super().__init__()
         self._docker_image = docker_image
         self._workspace_root = workspace_root
         self._docker_sem = docker_sem
         self._seed = seed
+        self._max_tool_calls = max_tool_calls
         self._env: DockerEnvironment | None = None
         self._task: TaskSpec | None = None
         self._trajectory: Trajectory | None = None
@@ -103,7 +103,7 @@ class SWEAgentEnv(_MultiTurnEnv):
         self._structural_log = [
             DefenseEvent("network_none", True, "container network=none"),
             DefenseEvent("test_mounts_readonly", True, "/workspace mounted :ro"),
-            DefenseEvent("step_budget", True, f"<= {self.MAX_TOOL_CALLS} tool calls"),
+            DefenseEvent("step_budget", True, f"<= {self._max_tool_calls} tool calls"),
         ]
         self._step_count = 0
         return self._render_prompt(task)
@@ -112,7 +112,7 @@ class SWEAgentEnv(_MultiTurnEnv):
         if self._env is None or self._task is None or self._trajectory is None:
             raise RuntimeError("step called before reset")
         self._step_count += 1
-        if self._step_count > self.MAX_TOOL_CALLS:
+        if self._step_count > self._max_tool_calls:
             return await self._finalise(reason="step_budget_exhausted")
 
         try:
@@ -130,8 +130,8 @@ class SWEAgentEnv(_MultiTurnEnv):
         })
         observation = result.output or result.error
 
-        if call.name == "run_tests":
-            return await self._finalise(reason="agent_submitted_tests")
+        if call.name == "evaluate":
+            return await self._finalise(reason="agent_submitted_evaluate")
         return observation, 0.0, False, {}
 
     async def close(self) -> None:
@@ -177,9 +177,9 @@ class SWEAgentEnv(_MultiTurnEnv):
         return (
             f"# Task\n{task.instruction}\n\n"
             f"# Repository\n{task.repository} @ {task.base_commit}\n\n"
-            f"# Tools\nYou have read_file, edit_file, delete_file, run_tests. "
-            f"You may not edit or delete test files.\n\n"
-            f"# Budget\n{self.MAX_TOOL_CALLS} tool calls, 16K context, 120s wall per tool.\n"
+            f"# Tools\nYou have read_file, edit_file, delete_file, evaluate. "
+            f"Call evaluate to submit your fix. You may not edit or delete test files.\n\n"
+            f"# Budget\n{self._max_tool_calls} tool calls, 16K context, 120s wall per tool.\n"
         )
 
 

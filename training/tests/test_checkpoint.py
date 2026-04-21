@@ -130,7 +130,7 @@ def test_trajectory_hash_is_deterministic_across_reconstructions():
     steps = [
         {"kind": "tool", "name": "read_file", "args": {"path": "src/x.py"}, "ok": True, "exit_code": 0},
         {"kind": "tool", "name": "edit_file", "args": {"path": "src/x.py", "patch": "+a"}, "ok": True, "exit_code": 0},
-        {"kind": "tool", "name": "run_tests", "args": {}, "ok": True, "exit_code": 0},
+        {"kind": "tool", "name": "evaluate", "args": {}, "ok": True, "exit_code": 0},
     ]
     a = Trajectory(prompt_id="p1", rollout_idx=0, steps=list(steps),
                    initial_head="HEAD", final_head="HEAD", final_diff="+a")

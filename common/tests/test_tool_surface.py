@@ -7,7 +7,7 @@ from common.tool_surface import FIXED_TOOL_DEFS, ToolSurfaceError, parse_tool_ca
 
 def test_fixed_surface_has_exactly_four_tools():
     names = {t["function"]["name"] for t in FIXED_TOOL_DEFS}
-    assert names == {"read_file", "edit_file", "delete_file", "run_tests"}
+    assert names == {"read_file", "edit_file", "delete_file", "evaluate"}
 
 
 def test_parse_openai_json():
@@ -25,8 +25,8 @@ def test_parse_openai_function_shape():
 
 
 def test_parse_swe_agent_pipe_form():
-    call = parse_tool_call('TOOL|run_tests|{}')
-    assert call.name == "run_tests"
+    call = parse_tool_call('TOOL|evaluate|{}')
+    assert call.name == "evaluate"
     assert call.arguments == {}
 
 

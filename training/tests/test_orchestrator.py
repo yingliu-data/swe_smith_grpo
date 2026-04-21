@@ -55,7 +55,7 @@ class _StubEnv:
                 if self._fail:
                     raise RuntimeError("synthetic rollout failure")
                 assert self._traj is not None
-                self._traj.steps.append({"kind": "tool", "name": "run_tests", "ok": True, "exit_code": 0})
+                self._traj.steps.append({"kind": "tool", "name": "evaluate", "ok": True, "exit_code": 0})
             finally:
                 if self._tracker is not None:
                     self._tracker.append(-1)
@@ -71,7 +71,7 @@ class _StubEnv:
 
 
 async def _llm_noop(_obs):
-    return "TOOL|run_tests|"
+    return "TOOL|evaluate|"
 
 
 # ---------------------------------------------------------------------------

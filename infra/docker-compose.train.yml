@@ -12,7 +12,7 @@ services:
       dockerfile: infra/train.Dockerfile
     image: ml-systems/train:latest
     container_name: ml-train
-    restart: on-failure
+    restart: "no"
     ipc: host
     privileged: true
     # prime-rl spawns per-rollout Docker containers via the host socket, so the
