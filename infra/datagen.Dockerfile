@@ -33,4 +33,4 @@ RUN uv sync --frozen
 
 # Default entrypoint: the CLI. Override at docker-compose level.
 ENTRYPOINT ["uv", "run", "datagen"]
-CMD ["--repo", "fastapi/fastapi", "--t", "15"]
+CMD ["--repo", "fastapi/fastapi"]

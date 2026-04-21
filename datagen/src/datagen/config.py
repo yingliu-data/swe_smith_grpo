@@ -18,7 +18,7 @@ class DatagenConfig:
     validation_timeout_seconds: int = 120
     llm_concurrency: int = 8
     docker_concurrency: int = 4
-    heldout_count: int = 10
+    heldout_count: int = 5
     seed: int = SEED
     output_root: Path = field(default_factory=lambda: Path("/workspace/datasets/pilot"))
     repos_root: Path = field(default_factory=lambda: Path("/workspace/repos"))
@@ -28,7 +28,7 @@ class DatagenConfig:
     methods: tuple[str, ...] = ("lm_modify", "lm_rewrite", "procedural", "pr_mirror")
     offline: bool = False
     dry_run: bool = False
-    max_prs: int | None = None
+    max_prs: int = 15
 
     @classmethod
     def from_env(cls) -> "DatagenConfig":
