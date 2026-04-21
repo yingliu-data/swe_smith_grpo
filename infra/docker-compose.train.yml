@@ -23,6 +23,11 @@ services:
       - WANDB_DIR=/workspace/logs/wandb
       - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
       - PYTHONUNBUFFERED=1
+      # 1-H100 co-location: prime-rl's launcher needs to see num_train_gpus +
+      # num_infer_gpus = 2 devices. Listing GPU 0 twice maps both slots to the
+      # same physical GPU; vLLM caps at gpu_memory_utilization=0.45, leaving
+      # the rest for the LoRA trainer.
+      - CUDA_VISIBLE_DEVICES=0,0
     volumes:
       - /workspace:/workspace
       - /var/run/docker.sock:/var/run/docker.sock

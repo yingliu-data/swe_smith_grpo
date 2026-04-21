@@ -66,12 +66,13 @@ async def _run(args: argparse.Namespace) -> int:
         "--trainer", f"@{cfg_root / 'train.toml'}",
         "--orchestrator", f"@{cfg_root / 'orch.toml'}",
         "--inference", f"@{cfg_root / 'infer.toml'}",
-        "--env", "training.swe_env:SWEAgentEnv",
-        "--dataset", str(args.dataset),
         "--output-dir", str(args.output_dir / session.session_id),
     ]
+    # Env + dataset are encoded in orch.toml's [[env]] section (prime-rl's
+    # RLConfig has no top-level --env/--dataset flags). The --dataset wrapper
+    # arg is retained for wrapper-level bookkeeping only.
     if args.resume:
-        cmd += ["--resume-from", str(_resume_path(args.output_dir, args.resume))]
+        cmd += ["--ckpt.resume-step", "-1"]  # -1 = restart from latest checkpoint
 
     proc = await asyncio.create_subprocess_exec(
         *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,

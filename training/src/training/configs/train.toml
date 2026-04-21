@@ -1,43 +1,32 @@
+# prime-rl v0.5.0 TrainerConfig
+# Loaded into RLConfig.trainer via `--trainer @train.toml`.
+# Schema: src/prime_rl/configs/trainer.py  (see TrainerConfig).
+
+max_steps = 30
+max_async_level = 1
+
 [model]
 name = "SWE-bench/SWE-agent-LM-7B"
-dtype = "bfloat16"
+seq_len = 16384
+# `dtype` does not exist on TrainerModelConfig — live mixed precision is
+# controlled via `optimization_dtype` / `reduce_dtype` (both default fp32).
 
-[model.peft]
-enabled = true
-type = "lora"
-r = 16
+[model.lora]
+rank = 16
 alpha = 32
 target_modules = ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
 
-[train]
-profile = "smoke"
-gradient_checkpointing = true
-learning_rate = 1e-6
-lr_scheduler = "constant"
-grad_clip = 0.05
-optimizer = "adamw"
-micro_batch_size = 1
-batch_size = 16
-max_steps = 30
-epochs = 1
+[optim]
+type = "adamw"
+lr = 1e-6
+weight_decay = 0.01
+max_norm = 0.05      # grad clip
 
-[loss]
-loss_type = "grpo"
-clip_low = 0.20
-clip_high = 0.28
-kl_coef = 0.0
-entropy_coef = 0.0
-advantage = "leave_one_out"
-length_normalize = "constant"
-max_length_constant = 16384
-importance_sampling_level = "token"
-std_normalize = false
-compact_filter = true
+[scheduler]
+type = "constant"
+
+# [loss] omitted → defaults to DefaultLossConfig (prime-rl's GRPO-style loss).
 
 [ckpt]
 interval = 10
 keep_last = 3
-
-[monitor.wandb]
-project = "ml-systems-takehome"
-mode = "offline"

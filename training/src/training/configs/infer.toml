@@ -1,20 +1,27 @@
+# prime-rl v0.5.0 InferenceConfig
+# Loaded into RLConfig.inference via `--inference @infer.toml`.
+# Schema: src/prime_rl/configs/inference.py  (see InferenceConfig).
+#
+# Co-located with the trainer on a single H100: gpu_memory_utilization=0.45
+# leaves ~44 GB for the LoRA trainer. Requires CUDA_VISIBLE_DEVICES=0,0 in
+# docker-compose so prime-rl's launcher sees "two" GPUs (both mapping to
+# physical 0). See infra/docker-compose.train.yml.
+
+gpu_memory_utilization = 0.45
+seed = 42
+# enable_lora / max_lora_rank are auto-set from trainer.model.lora by
+# RLConfig.auto_setup_lora — no need to duplicate here.
+
+[server]
+host = "0.0.0.0"
+port = 8000
+
 [model]
 name = "SWE-bench/SWE-agent-LM-7B"
 dtype = "bfloat16"
 max_model_len = 16384
 enforce_eager = false
 
-[server]
-port = 8000
-host = "0.0.0.0"
-
-[engine]
-gpu_memory_utilization = 0.45
-tensor_parallel_size = 1
-enable_prefix_caching = false
-seed = 42
-
-[sampling]
-temperature = 1.0
-top_p = 0.95
-max_tokens = 2048
+[parallel]
+tp = 1
+dp = 1
