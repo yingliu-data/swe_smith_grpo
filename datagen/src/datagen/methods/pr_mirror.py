@@ -31,14 +31,21 @@ def _render_file_section(path: str, hunks) -> str:
 class PRMirrorMethod(BaseMutationMethod):
     """Forward-patch subset: drop one random hunk from the merged PR's src diff.
 
-    The remaining hunks are a VALID SUBSET of the forward fix — they apply cleanly
-    at base_commit because each hunk's context lines reflect the state before the
-    fix. The dropped hunk leaves part of the bug in place so the F2P tests should
-    still fail (probability depends on whether the dropped hunk was load-bearing
-    for the specific failure the test probes).
+    Each ``PatchedFile`` section of the reference_patch is treated as its own
+    sequential commit (fastapi's .patch URL returns git-format-patch output for
+    multi-commit PRs, so a single file can appear across several independent
+    ``diff --git`` sections whose hunk line-numbers are relative to the state
+    AFTER earlier sections have been applied). Consolidating those into a single
+    section scrambles hunk ordering and yields "patch fragment without header"
+    from ``git apply``. We preserve the original section structure: each file
+    section keeps its own ``diff --git`` header, and we drop a single hunk
+    across the whole patch.
 
-    The previous implementation inverted the patch by swapping +/- prefixes, which
-    produced a diff whose context lines referenced POST-fix code that does not
+    Safety rule: drops are restricted to the LAST section so earlier sections'
+    state setup remains intact for any subsequent sections.
+
+    The previous implementation inverted the patch by swapping +/- prefixes,
+    producing a diff whose context lines referenced POST-fix code that does not
     exist at base_commit — every candidate was rejected by ``git apply --check``.
     """
 
@@ -47,32 +54,44 @@ class PRMirrorMethod(BaseMutationMethod):
     async def generate(self, ctx: Context) -> Candidate | None:
         rng = random.Random(ctx.seed * 17 + ctx.trial_index + 5_000_003)
         ps = PatchSet(ctx.reference_patch)
-        src_files = [
-            pf for pf in ps
-            if pf.path.endswith(".py") and not _is_test_path(pf.path)
-        ]
-        if not src_files:
-            return None
-
-        all_hunks: list[tuple[str, object]] = []
-        for pf in src_files:
-            for hunk in pf:
-                all_hunks.append((pf.path, hunk))
-        if len(all_hunks) < 2:
-            return None  # can't drop one and still have a non-trivial diff
-
-        drop_idx = rng.randrange(len(all_hunks))
-        kept_by_path: dict[str, list] = {}
-        for i, (path, hunk) in enumerate(all_hunks):
-            if i == drop_idx:
+        sections: list[tuple[str, list]] = []
+        for pf in ps:
+            if not pf.path.endswith(".py") or _is_test_path(pf.path):
                 continue
-            kept_by_path.setdefault(path, []).append(hunk)
-        if not kept_by_path:
+            hunks = list(pf)
+            if hunks:
+                sections.append((pf.path, hunks))
+        if not sections:
             return None
 
-        sections = [_render_file_section(path, hunks) for path, hunks in kept_by_path.items()]
+        total_hunks = sum(len(hs) for _, hs in sections)
+        if total_hunks < 2:
+            return None  # dropping the only hunk leaves nothing
+
+        # Restrict drops to the LAST section so earlier sections still set up
+        # state correctly for any hunks that depend on them.
+        last_path, last_hunks = sections[-1]
+        if len(last_hunks) >= 2:
+            drop_local = rng.randrange(len(last_hunks))
+            last_hunks.pop(drop_local)
+            drop_desc = f"hunk #{drop_local} of last section ({last_path})"
+        else:
+            # Last section has only one hunk — drop the entire section
+            sections.pop()
+            drop_desc = f"entire last section ({last_path})"
+            if not sections:
+                return None
+
+        rendered = [
+            _render_file_section(path, hunks)
+            for path, hunks in sections
+            if hunks
+        ]
+        if not rendered:
+            return None
+
         return Candidate(
             method=self.name,
-            buggy_patch="".join(sections),
-            rationale=f"forward src_patch minus hunk #{drop_idx} of {len(all_hunks)} (trial {ctx.trial_index})",
+            buggy_patch="".join(rendered),
+            rationale=f"forward src_patch minus {drop_desc} (trial {ctx.trial_index})",
         )

@@ -82,6 +82,50 @@ async def test_pr_mirror_drops_one_hunk(repo: Path):
     assert has_a ^ has_b, "drop-one-hunk must keep exactly one hunk in forward direction"
 
 
+_REF_PATCH_MULTISECTION = """\
+diff --git a/mod.py b/mod.py
+--- a/mod.py
++++ b/mod.py
+@@ -18,5 +18,5 @@
+ ctx_a
+ ctx_b
+-old_early
++new_early
+ ctx_c
+ ctx_d
+diff --git a/mod.py b/mod.py
+--- a/mod.py
++++ b/mod.py
+@@ -78,3 +78,3 @@
+ ctx_e
+-old_late
++new_late
+ ctx_f
+"""
+
+
+@pytest.mark.asyncio
+async def test_pr_mirror_preserves_multisection_structure(repo: Path):
+    # git-format-patch output for multi-commit PRs yields MULTIPLE `diff --git`
+    # sections for the same file; each section's line numbers are relative to
+    # the state produced by previous sections. Consolidating them under one
+    # header scrambles hunk ordering and produces
+    # `patch fragment without header at line N`. Verify pr_mirror keeps each
+    # original `diff --git` section intact.
+    ctx = Context(
+        repo="ex/x", repo_dir=repo, pr_number=1, base_commit="HEAD",
+        merge_commit="HEAD", pr_title="t", pr_body="",
+        reference_patch=_REF_PATCH_MULTISECTION, seed=42, trial_index=0,
+    )
+    cand = await PRMirrorMethod().generate(ctx)
+    assert cand is not None
+    # Exactly one of the two sections should be dropped — by the LAST-section
+    # safety rule, that's the single-hunk second section.
+    assert cand.buggy_patch.count("diff --git a/mod.py") == 1
+    assert "old_early" in cand.buggy_patch  # first section kept
+    assert "old_late" not in cand.buggy_patch  # second section dropped
+
+
 @pytest.mark.asyncio
 async def test_procedural_mutation_produces_diff(repo: Path):
     ctx = Context(
