@@ -4,12 +4,30 @@
 
 max_steps = 30
 max_async_level = 1
+# Move optimizer state to host DRAM to free HBM on the 32 GB RTX 5090. Pairs
+# with fsdp_cpu_offload below; both are required to fit 7B + LoRA + vLLM
+# co-located on a single Blackwell card.
+optim_cpu_offload = true
 
 [model]
 name = "SWE-bench/SWE-agent-LM-7B"
-seq_len = 16384
+# 8192 instead of 16384: activation memory is O(seq_len) per layer, so halving
+# here is the single largest saving before considering checkpointing. Must
+# match orch.toml's seq_len; vLLM's max_model_len in infer.toml may be larger
+# (only bounds generation budget) but keep them aligned to avoid confusion.
+seq_len = 8192
 # `dtype` does not exist on TrainerModelConfig — live mixed precision is
 # controlled via `optimization_dtype` / `reduce_dtype` (both default fp32).
+# Recompute activations on the backward pass. `full` = every transformer
+# block (freq=1). Trades ~30% compute for a large activation-memory cut; on
+# a 32 GB 5090 with a co-located 7B vLLM this is load-bearing, not optional.
+ac = { mode = "full", freq = 1 }
+# Offload checkpointed activations to pinned host memory between fwd/bwd.
+# Small additional saving on top of `ac`; pin_memory=true keeps DMA fast.
+ac_offloading = { pin_memory = true }
+# Shard optimizer + grads + params to CPU when idle. Adds PCIe traffic per
+# step but unblocks the 5090 fit; remove on H100 where HBM isn't the gate.
+fsdp_cpu_offload = true
 
 [model.lora]
 rank = 16

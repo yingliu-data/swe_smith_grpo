@@ -1,6 +1,6 @@
 version: "3.9"
 
-# Pod B — H100 training. Co-located vLLM + prime-rl.
+# Pod B — rtx 5090 training. Co-located vLLM + prime-rl.
 #
 # Requires RunPod pod launched with --privileged and host docker socket
 # bind-mounted; see infra/runpod-notes.md.

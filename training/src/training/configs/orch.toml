@@ -4,7 +4,9 @@
 
 batch_size = 16            # total rollouts per step
 rollouts_per_example = 4   # GRPO group size G — unique prompts = batch_size/G = 4
-seq_len = 16384
+# Must match trainer's model.seq_len (see configs/train.toml). Halved from
+# 16384 to fit activation memory on the RTX 5090; bump back up on H100.
+seq_len = 8192
 max_steps = 30
 max_async_level = 1
 max_off_policy_steps = 16
