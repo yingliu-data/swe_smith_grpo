@@ -50,14 +50,14 @@ FIXED_TOOL_DEFS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
-            "name": "run_tests",
-            "description": "Run the task's test_command; returns stdout/stderr and exit code.",
+            "name": "evaluate",
+            "description": "Submit the current fix: runs the task's test_command and finalises the rollout. Returns stdout/stderr and exit code.",
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
 ]
 
-VALID_TOOL_NAMES: frozenset[str] = frozenset({"read_file", "edit_file", "delete_file", "run_tests"})
+VALID_TOOL_NAMES: frozenset[str] = frozenset({"read_file", "edit_file", "delete_file", "evaluate"})
 
 
 class ToolSurfaceError(ValueError):

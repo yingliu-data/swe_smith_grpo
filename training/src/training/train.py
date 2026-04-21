@@ -3,8 +3,10 @@ from __future__ import annotations
 import argparse
 import asyncio
 import os
+import shutil
 import signal
 import subprocess
+import sys
 from pathlib import Path
 
 from common.config import apply_seed
@@ -46,9 +48,21 @@ async def _run(args: argparse.Namespace) -> int:
     )
     log.trace.log("train.start", profile=profile.profile, dataset=str(args.dataset))
 
-    cfg_root = Path(__file__).parent / "src" / "training" / "configs"
+    cmd_parts = args.prime_rl.split()
+    if _prime_rl_missing(cmd_parts):
+        msg = (
+            f"prime-rl not resolvable from {args.prime_rl!r}. "
+            "prime-rl is Linux+CUDA-only; run via `docker compose -f "
+            "infra/docker-compose.train.yml up --build train` on Pod B, or set "
+            "PRIME_RL_CMD to a working `rl` entry point."
+        )
+        print(msg, file=sys.stderr)
+        ticket.finish(state="failed", error=msg)
+        return 127
+
+    cfg_root = Path(__file__).parent / "configs"
     cmd = [
-        *args.prime_rl.split(),
+        *cmd_parts,
         "--trainer", f"@{cfg_root / 'train.toml'}",
         "--orchestrator", f"@{cfg_root / 'orch.toml'}",
         "--inference", f"@{cfg_root / 'infer.toml'}",
@@ -114,6 +128,22 @@ def _resume_path(output_dir: Path, resume: str) -> Path:
             raise RuntimeError("no valid checkpoint found for --resume latest")
         return ckpt.path
     return output_dir / resume
+
+
+def _prime_rl_missing(cmd_parts: list[str]) -> bool:
+    """Return True if neither `rl` nor the target of `uv run rl` is installed."""
+    if shutil.which(cmd_parts[0]) is None:
+        return True
+    # Typical shape: `uv run rl` or `uv --project X run rl`. Use `uv run` to
+    # ask uv whether the `rl` entry point resolves without spawning a trainer.
+    try:
+        probe = subprocess.run(
+            [*cmd_parts, "--help"],
+            capture_output=True, timeout=15, text=True,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return False  # let the real spawn speak for itself
+    return probe.returncode != 0 and "Failed to spawn" in (probe.stderr or "")
 
 
 def _sigterm(proc: asyncio.subprocess.Process) -> None:

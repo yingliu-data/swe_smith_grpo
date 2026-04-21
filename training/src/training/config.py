@@ -23,6 +23,7 @@ class TrainingConfig:
     llm_concurrency: int
     docker_concurrency: int
     heartbeat_stale_seconds: int
+    max_tool_calls: int
 
 
 SMOKE = TrainingConfig(
@@ -38,6 +39,7 @@ SMOKE = TrainingConfig(
     llm_concurrency=8,
     docker_concurrency=4,
     heartbeat_stale_seconds=600,
+    max_tool_calls=20,
 )
 
 FULL = TrainingConfig(
@@ -53,6 +55,7 @@ FULL = TrainingConfig(
     llm_concurrency=8,
     docker_concurrency=4,
     heartbeat_stale_seconds=600,
+    max_tool_calls=20,
 )
 
 _PROFILES["smoke"] = SMOKE

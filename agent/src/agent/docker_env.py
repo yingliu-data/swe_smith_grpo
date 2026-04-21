@@ -97,8 +97,14 @@ class DockerEnvironment(Environment):
             return await self.edit_file(args["path"], args["patch"])
         if name == "delete_file":
             return await self.delete_file(args["path"])
-        if name == "run_tests":
-            return await self._run_tests()
+        if name == "evaluate":
+            eval_result = await self.evaluate()
+            return ToolResult(
+                name="evaluate",
+                ok=eval_result.passed,
+                output=eval_result.output,
+                exit_code=eval_result.exit_code,
+            )
         return ToolResult(name=name, ok=False, error=f"unknown tool: {name}")
 
     async def read_file(self, path: str) -> ToolResult:
@@ -192,7 +198,3 @@ class DockerEnvironment(Environment):
             if message is None:
                 break
             sink.append(message.data if hasattr(message, "data") else bytes(message))
-
-    async def _run_tests(self) -> ToolResult:
-        rc, out = await self._exec(list(self.task.test_command))
-        return ToolResult(name="run_tests", ok=rc == 0, output=out, exit_code=rc)

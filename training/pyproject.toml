@@ -15,10 +15,12 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# prime-rl itself is NOT in this list — it has extensive transitive git deps
+# (verifiers, torchtitan, transformers git rev, cu128 torch wheels) that require
+# its own tool.uv.sources to resolve. Instead, it is installed into its own
+# project venv at /opt/prime-rl in the Docker image; `PRIME_RL_CMD` in the
+# container points at that venv. See infra/train.Dockerfile.
 gpu = [
-    "torch>=2.5",
-    "transformers>=4.56",
-    "vllm>=0.6.0",
     "datasets>=2.20",
     "peft>=0.11",
     "wandb>=0.17",

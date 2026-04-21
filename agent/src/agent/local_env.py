@@ -33,8 +33,14 @@ class LocalWorkspaceEnvironment(Environment):
             return self.edit_file(args["path"], args["patch"])
         if name == "delete_file":
             return self.delete_file(args["path"])
-        if name == "run_tests":
-            return self._run_cmd(self._test_argv())
+        if name == "evaluate":
+            eval_result = self.evaluate()
+            return ToolResult(
+                name="evaluate",
+                ok=eval_result.passed,
+                output=eval_result.output,
+                exit_code=eval_result.exit_code,
+            )
         return ToolResult(name=name, ok=False, error=f"unknown tool: {name}")
 
     def read_file(self, path: str) -> ToolResult:
@@ -114,21 +120,6 @@ class LocalWorkspaceEnvironment(Environment):
             capture_output=True,
             text=True,
             timeout=60,
-        )
-
-    def _run_cmd(self, argv: Iterable[str]) -> ToolResult:
-        proc = subprocess.run(
-            list(argv),
-            cwd=str(self.workspace_root),
-            capture_output=True,
-            text=True,
-            timeout=self.command_timeout_seconds,
-        )
-        return ToolResult(
-            name="run_tests",
-            ok=proc.returncode == 0,
-            output=proc.stdout + proc.stderr,
-            exit_code=proc.returncode,
         )
 
     def _eval_cmd(self, argv: Iterable[str]) -> EvaluationResult:

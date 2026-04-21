@@ -98,12 +98,12 @@ async def run_single_rollout(
     history: list[dict[str, str]] = [
         {"role": "system",
          "content": "You are a software-engineering agent. Tools: read_file, edit_file, "
-                    "delete_file, run_tests. You may not edit or delete test files. "
-                    "Submit your fix by calling run_tests when ready."},
+                    "delete_file, evaluate. You may not edit or delete test files. "
+                    "Submit your fix by calling evaluate when ready."},
     ]
     observation = (f"Task: {instance.instruction}\nRepo: {instance.repo} @ "
                    f"{instance.base_commit}\nAvailable tools: read_file, edit_file, "
-                   f"delete_file, run_tests.")
+                   f"delete_file, evaluate.")
     trajectory: list[dict[str, Any]] = []
     initial_head = await env.current_head()
     structural = [
@@ -135,7 +135,7 @@ async def run_single_rollout(
             })
             history.append({"role": "tool", "content": result.output or result.error or ""})
 
-            if call.name == "run_tests":
+            if call.name == "evaluate":
                 break
             observation = result.output or result.error or ""
         else:
