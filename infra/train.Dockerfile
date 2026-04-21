@@ -39,4 +39,11 @@ WORKDIR /app/training
 RUN uv sync --extra gpu
 
 # Trainer CLI. Wrapped by infra/run_train.sh supervisor loop in production.
+# CMD provides sensible defaults so RunPod can launch the image directly
+# without a Container Start Command override. docker-compose.train.yml
+# still passes its own `command:` which overrides this CMD for local dev.
 ENTRYPOINT ["uv", "run", "train"]
+CMD ["--dataset", "/workspace/datasets/pilot/pilot.jsonl", \
+     "--profile", "smoke", \
+     "--output-dir", "/workspace/checkpoints", \
+     "--sessions-root", "/workspace/sessions"]
