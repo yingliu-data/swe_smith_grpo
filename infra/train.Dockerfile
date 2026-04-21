@@ -73,7 +73,10 @@ RUN /opt/prime-rl/.venv/bin/python -c "import flash_attn, ring_flash_attn; print
 # via shutil.copytree (see agent/src/agent/async_local_env.py::prepare).
 # ---------------------------------------------------------------------------
 RUN git clone https://github.com/fastapi/fastapi.git /opt/repo-cache/fastapi
-RUN /opt/prime-rl/.venv/bin/pip install \
+# prime-rl's venv is built by `uv sync` which doesn't seed pip, so shell out
+# via `uv pip install --python` the same way the overlay install above does.
+RUN UV_PROJECT=/opt/prime-rl uv pip install \
+        --python /opt/prime-rl/.venv/bin/python \
         -e /opt/repo-cache/fastapi \
         pytest pytest-asyncio anyio httpx dirty-equals
 

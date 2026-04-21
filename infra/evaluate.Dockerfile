@@ -39,6 +39,7 @@ RUN uv sync --extra gpu
 # rollout's `python -m pytest` finds them when invoked via cwd=<scratch-dir>.
 RUN git clone https://github.com/fastapi/fastapi.git /workspace/src/fastapi__fastapi
 RUN uv pip install \
+        --python /app/evaluation/.venv/bin/python \
         -e /workspace/src/fastapi__fastapi \
         pytest pytest-asyncio anyio httpx dirty-equals
 
