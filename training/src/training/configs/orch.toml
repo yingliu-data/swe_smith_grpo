@@ -5,7 +5,7 @@
 batch_size           = 16   # total rollouts per step
 rollouts_per_example = 4    # GRPO group size G → unique prompts = 16 / 4 = 4
 seq_len              = 8192 # MUST equal train.model.seq_len
-max_steps            = 30
+max_steps            = 10
 max_async_level      = 1
 max_off_policy_steps = 16
 seed                 = 42

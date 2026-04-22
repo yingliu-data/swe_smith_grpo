@@ -58,7 +58,7 @@ class SWEAgentEnv(vf.MultiTurnEnv):
             self._rollout_lock.release()
             raise
         state["env"] = env
-        state["task"] = task
+        state["task_spec"] = task
         state["test_patch"] = row.get("test_patch", "")
         state["initial_head"] = await env.current_head()
         state["tool_calls"] = 0
@@ -90,7 +90,13 @@ class SWEAgentEnv(vf.MultiTurnEnv):
 
     @vf.stop
     async def budget_exhausted(self, state) -> bool:
-        return state.get("tool_calls", 0) >= self.max_turns
+        if state.get("tool_calls", 0) >= self.max_turns:
+          if state.get("reward_value") is None:
+              state["final_env_response"] = [                                                                
+                  {"role": "user", "content": await _finalise(state)}
+              ]                                                                                              
+          return True                                   
+        return False
 
     @vf.cleanup
     async def cleanup_rollout(self, state) -> None:
@@ -106,7 +112,7 @@ class SWEAgentEnv(vf.MultiTurnEnv):
 async def _finalise(state) -> str:
     """Finalise the rollout: compute reward from the diff + F2P pytest result."""
     env: AsyncLocalEnvironment = state["env"]
-    task: TaskSpec = state["task"]
+    task: TaskSpec = state["task_spec"]
     try:
         final_head = await env.current_head()
         final_diff = await env.current_diff()
@@ -163,7 +169,6 @@ def _load_jsonl_dataset(path: str) -> Dataset:
         # with `unhashable type: 'dict'` if left to fall back to the row dict.
         return {
             "prompt": row.get("problem_statement", ""),
-            "task": row.get("instance_id", ""),
             "info": row,
         }
 

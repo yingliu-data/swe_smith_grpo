@@ -130,8 +130,7 @@ docker compose -f infra/docker-compose.evaluate.yml up evaluate
 | 500 GB volume × 1 mo | $1.40 |
 | **Total** | **~$13.10** (buffer ~$6.90 in $20 envelope) |
 
-Full profile (max_steps=150, G=8, 2× H100) documented in plan, not built:
-~$70.
+
 
 ## Discrepancies with `manual_prompts.md`
 
