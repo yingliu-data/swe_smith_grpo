@@ -59,7 +59,7 @@ async def _run(cfg: DatagenConfig) -> int:
         llm_concurrency=cfg.llm_concurrency, docker_concurrency=cfg.docker_concurrency,
         heldout_count=cfg.heldout_count, seed=cfg.seed, output_root=cfg.output_root,
         repos_root=cfg.repos_root, sessions_root=cfg.sessions_root,
-        harbor_root=cfg.harbor_root, docker_cache_root=cfg.docker_cache_root,
+        docker_cache_root=cfg.docker_cache_root,
         methods=methods, offline=cfg.offline, dry_run=cfg.dry_run, max_prs=cfg.max_prs,
     )
     pipeline = Pipeline(cfg, trace=trace)
@@ -79,7 +79,6 @@ def main() -> None:
         llm_concurrency=args.llm_concurrency, docker_concurrency=args.docker_concurrency,
         heldout_count=args.heldout, output_root=args.output_root,
         repos_root=args.repos_root, sessions_root=args.sessions_root,
-        harbor_root=args.output_root / "harbor",
         offline=args.offline, dry_run=args.dry_run, max_prs=args.max_prs,
     )
     try:

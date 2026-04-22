@@ -4,7 +4,6 @@ import json
 from pathlib import Path
 
 from datagen.writers.swebench_jsonl import InstanceRecord, SWEBenchJSONLWriter
-from datagen.writers.harbor_dir import HarborDirWriter
 
 
 def _rec() -> InstanceRecord:
@@ -34,11 +33,3 @@ def test_swebench_jsonl_append(tmp_path: Path):
     assert parsed["FAIL_TO_PASS"] == ["tests/test_x.py::test_a"]
 
 
-def test_harbor_dir_layout(tmp_path: Path):
-    w = HarborDirWriter(tmp_path / "harbor")
-    dest = w.write(_rec(), ["python", "-m", "pytest", "-x", "tests/test_x.py::test_a"])
-    for name in ("instruction.md", "test.sh", "reference.diff", "task.json"):
-        assert (dest / name).exists()
-    task = json.loads((dest / "task.json").read_text())
-    assert task["repository"] == "abc/xyz"
-    assert task["test_command"][0] == "python"

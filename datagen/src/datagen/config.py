@@ -23,7 +23,6 @@ class DatagenConfig:
     output_root: Path = field(default_factory=lambda: Path("/workspace/datasets/pilot"))
     repos_root: Path = field(default_factory=lambda: Path("/workspace/repos"))
     sessions_root: Path = field(default_factory=lambda: Path("/workspace/sessions"))
-    harbor_root: Path = field(default_factory=lambda: Path("/workspace/datasets/pilot/harbor"))
     docker_cache_root: Path = field(default_factory=lambda: Path("/workspace/docker-cache"))
     methods: tuple[str, ...] = ("lm_modify", "lm_rewrite", "procedural", "pr_mirror")
     offline: bool = False

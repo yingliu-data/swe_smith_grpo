@@ -18,7 +18,7 @@ from .methods.lm import _LMBase
 from .nebius_client import NebiusClient
 from .repo_manager import PullRequestInfo, RepoManager
 from .validator import Validator, split_reference_patch, extract_f2p_nodeids
-from .writers import HarborDirWriter, SWEBenchJSONLWriter
+from .writers import SWEBenchJSONLWriter
 from .writers.swebench_jsonl import InstanceRecord
 from .yield_logger import MethodYield, YieldLogger
 
@@ -65,7 +65,6 @@ class Pipeline:
 
         jsonl_writer = SWEBenchJSONLWriter(cfg.output_root / "pilot.jsonl")
         heldout_writer = SWEBenchJSONLWriter(cfg.output_root / "heldout.jsonl")
-        harbor_writer = HarborDirWriter(cfg.harbor_root)
         yield_logger = YieldLogger(cfg.output_root / "yield.csv")
         memory = MemoryStore(cfg.output_root / "setup_facts")
 
@@ -100,7 +99,6 @@ class Pipeline:
                         created_at=datetime.now(timezone.utc).isoformat(),
                         metadata={"method": "base", "pr": pr.number},
                     )
-                    harbor_writer.write(rec, ["python", "-m", "pytest", "-x", "--tb=short", *f2p])
                     passing.append((rec, f2p))
                 else:
                     for name, method in methods.items():
@@ -109,7 +107,7 @@ class Pipeline:
                                 self._generate_validate_write(
                                     pr=pr, repo_dir=repo_dir, reference_patch=patch,
                                     method=method, trial=t, stats=stats[name],
-                                    jsonl=jsonl_writer, harbor=harbor_writer, memory=memory,
+                                    jsonl=jsonl_writer, memory=memory,
                                     passing=passing,
                                 )
                             ))
@@ -151,7 +149,6 @@ class Pipeline:
         trial: int,
         stats: _PerMethodStats,
         jsonl: SWEBenchJSONLWriter,
-        harbor: HarborDirWriter,
         memory: MemoryStore,
         passing: list[tuple[InstanceRecord, list[str]]],
     ) -> None:
@@ -199,8 +196,6 @@ class Pipeline:
             created_at=datetime.now(timezone.utc).isoformat(),
             metadata={"method": method.name, "trial": trial, "pr": pr.number, "rationale": cand.rationale},
         )
-        test_cmd = ["python", "-m", "pytest", "-x", "--tb=short", *f2p]
-        harbor.write(rec, test_cmd)
         memory.put(
             f"{instance_id}",
             MemoryRecord(
