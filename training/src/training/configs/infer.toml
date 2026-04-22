@@ -3,15 +3,21 @@
 # See train.toml for cross-file invariants.
 #
 # Deployment: 1 GPU co-located via CUDA_VISIBLE_DEVICES="0,0".  Trainer and
-# vLLM share a single RTX PRO 6000 Blackwell (96 GB).  The 7B bf16 model is
-# ~15 GiB on disk; two copies (trainer + vLLM weights) plus KV cache and
-# activations would OOM a 32 GB card regardless of fraction — the 32 GB 5090
-# we tried first reached `Available KV cache memory: -6.44 GiB` at
-# gpu_memory_utilization=0.45.  On 96 GB, 0.45 gives vLLM ~43 GiB (weights
-# ~15 + KV cache ~28), leaving ~52 GiB for the trainer's weights + LoRA
-# optimiser + activations.  Raise only if the trainer's peak allocation drops.
+# vLLM share a single RTX PRO 6000 Blackwell (96 GB) as two separate
+# processes.  vLLM's gpu_memory_utilization is a fraction of *total* HBM,
+# but its KV-cache profiler subtracts memory already claimed by other
+# processes on the same physical device.  At 0.45 we saw:
+#   `Available KV cache memory: -6.44 GiB`
+# because the trainer process had already loaded the 7B bf16 weights
+# (~15 GiB) plus LoRA optimiser state plus activations from its profile
+# forward by the time vLLM came up, leaving (0.45*96 − trainer_resident
+# − vllm_weights − activations) ≈ negative.  0.75 gives vLLM a 72 GiB
+# budget which accommodates trainer-resident ~30 GiB + vLLM weights ~15
+# GiB + profile activations ~3 GiB and still leaves ~24 GiB for the KV
+# cache.  Raise further (→0.85) if KV pressure shows up in orchestrator
+# logs as `VLLM_PREFIX_CACHE_HIT_RATE` dropping.
 
-gpu_memory_utilization = 0.45
+gpu_memory_utilization = 0.75
 seed                   = 42
 # enable_lora + max_lora_rank are auto-set from train.model.lora by
 # RLConfig.auto_setup_lora — don't duplicate here.

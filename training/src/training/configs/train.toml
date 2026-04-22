@@ -18,14 +18,16 @@ seq_len = 8192   # keep ≤ infer.max_model_len; bump to 16384 later if budget a
 
 # Activation checkpointing: recompute every transformer block on the backward
 # pass.  ~30% compute tax for a large activation-memory cut.  Kept on for the
-# co-located trainer+vLLM topology on a single RTX PRO 6000 (96 GB), even
-# though raw activation memory fits without it — cheap insurance against peak
-# spikes when vLLM is also resident.  Pure GPU recompute — no host offload.
+# co-located trainer+vLLM topology on a single RTX PRO 6000 (96 GB) so the
+# trainer's peak allocation stays below the budget left after vLLM claims
+# its gpu_memory_utilization share (see infer.toml).  Pure GPU recompute —
+# no host offload.
 ac = { mode = "full", freq = 1 }
 
 
-# LoRA (~0.3% trainable) + ac=full + seq_len=8192 fits comfortably on 96 GB.
-# If this OOMs, drop seq_len to 4096 first, then LoRA rank 16 → 8.
+# LoRA (~0.3% trainable) + ac=full + seq_len=8192 fits on 96 GB alongside
+# vLLM at gpu_memory_utilization=0.75.  If this OOMs, drop seq_len to 4096
+# first, then LoRA rank 16 → 8.
 #
 # `dtype` is NOT a TrainerModelConfig field; mixed precision is controlled
 # via optimization_dtype / reduce_dtype (both default fp32).

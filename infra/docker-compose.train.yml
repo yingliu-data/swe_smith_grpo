@@ -5,8 +5,9 @@ version: "3.9"
 # ="0,0" alias (prime-rl's launcher otherwise refuses: num_train_gpus +
 # num_infer_gpus = 2 > 1 physical card). The 2-GPU dedicated layout is the
 # intended production topology; this is the capacity-constrained stopgap.
-# The 32 GB 5090 we tried first can't hold two 7B bf16 model copies
-# (trainer + vLLM weights) alongside KV cache regardless of fraction.
+# vLLM's gpu_memory_utilization is tuned in infer.toml — it subtracts
+# the trainer's already-claimed memory when sizing the KV cache, so the
+# fraction on a colocated setup runs higher than a solo-vLLM deployment.
 #
 # Rollouts run inside this container (sequential, asyncio.Lock-serialised)
 # via agent.AsyncLocalEnvironment — no docker-in-docker, no privileged mode,
