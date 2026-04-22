@@ -3,11 +3,13 @@
 # See train.toml for cross-file invariants.
 #
 # Deployment: 1 GPU co-located via CUDA_VISIBLE_DEVICES="0,0".  Trainer and
-# vLLM share a single 32 GB 5090, so vLLM's fraction must leave enough HBM
-# for the trainer's weights, gradients, and activations.  0.45 is the
-# empirically validated ceiling for SWE-agent-LM-7B at seq_len=8192 with
-# LoRA rank-16 + ac=full.  Raise only if the trainer's peak allocation
-# drops (e.g., lower rank, smaller seq_len).
+# vLLM share a single RTX PRO 6000 Blackwell (96 GB).  The 7B bf16 model is
+# ~15 GiB on disk; two copies (trainer + vLLM weights) plus KV cache and
+# activations would OOM a 32 GB card regardless of fraction — the 32 GB 5090
+# we tried first reached `Available KV cache memory: -6.44 GiB` at
+# gpu_memory_utilization=0.45.  On 96 GB, 0.45 gives vLLM ~43 GiB (weights
+# ~15 + KV cache ~28), leaving ~52 GiB for the trainer's weights + LoRA
+# optimiser + activations.  Raise only if the trainer's peak allocation drops.
 
 gpu_memory_utilization = 0.45
 seed                   = 42

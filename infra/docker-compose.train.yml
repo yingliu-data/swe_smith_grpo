@@ -1,10 +1,12 @@
 version: "3.9"
 
 # Pod B — 1-GPU co-located training. prime-rl trainer + vLLM inference
-# share a single 5090 via the CUDA_VISIBLE_DEVICES="0,0" alias (prime-rl's
-# launcher otherwise refuses: num_train_gpus + num_infer_gpus = 2 > 1
-# physical card). The 2-GPU dedicated layout is the intended production
-# topology; this is the capacity-constrained stopgap.
+# share a single RTX PRO 6000 Blackwell (96 GB) via the CUDA_VISIBLE_DEVICES
+# ="0,0" alias (prime-rl's launcher otherwise refuses: num_train_gpus +
+# num_infer_gpus = 2 > 1 physical card). The 2-GPU dedicated layout is the
+# intended production topology; this is the capacity-constrained stopgap.
+# The 32 GB 5090 we tried first can't hold two 7B bf16 model copies
+# (trainer + vLLM weights) alongside KV cache regardless of fraction.
 #
 # Rollouts run inside this container (sequential, asyncio.Lock-serialised)
 # via agent.AsyncLocalEnvironment — no docker-in-docker, no privileged mode,

@@ -14,16 +14,17 @@ max_async_level = 1
 
 [model]
 name    = "SWE-bench/SWE-agent-LM-7B"
-seq_len = 8192   # halved from 16384 to fit activation memory on 32 GB RTX 5090.
+seq_len = 8192   # keep ≤ infer.max_model_len; bump to 16384 later if budget allows.
 
 # Activation checkpointing: recompute every transformer block on the backward
-# pass.  ~30% compute tax for a large activation-memory cut.  Load-bearing on
-# the 5090, not optional.  Pure GPU recompute — no host offload.
+# pass.  ~30% compute tax for a large activation-memory cut.  Kept on for the
+# co-located trainer+vLLM topology on a single RTX PRO 6000 (96 GB), even
+# though raw activation memory fits without it — cheap insurance against peak
+# spikes when vLLM is also resident.  Pure GPU recompute — no host offload.
 ac = { mode = "full", freq = 1 }
 
-# Deliberately NOT set (user policy — avoid PCIe offload stalls):
-#   fsdp_cpu_offload, optim_cpu_offload, ac_offloading
-# LoRA (~0.3% trainable) + ac=full + seq_len=8192 is expected to fit natively.
+
+# LoRA (~0.3% trainable) + ac=full + seq_len=8192 fits comfortably on 96 GB.
 # If this OOMs, drop seq_len to 4096 first, then LoRA rank 16 → 8.
 #
 # `dtype` is NOT a TrainerModelConfig field; mixed precision is controlled

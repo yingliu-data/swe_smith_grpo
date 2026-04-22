@@ -1,8 +1,10 @@
-# Pod B — 1-GPU co-located trainer. prime-rl + vLLM share a single 5090
-# via the CUDA_VISIBLE_DEVICES="0,0" alias: prime-rl's launcher asserts
-# num_train_gpus + num_infer_gpus ≤ len(physical_gpu_ids), and duplicating
-# device 0 in the list makes that check pass on a 1-GPU pod. Capacity
-# stopgap; the 2-GPU layout is the intended production topology.
+# Pod B — 1-GPU co-located trainer. prime-rl + vLLM share a single
+# RTX PRO 6000 Blackwell (96 GB) via the CUDA_VISIBLE_DEVICES="0,0" alias:
+# prime-rl's launcher asserts num_train_gpus + num_infer_gpus ≤
+# len(physical_gpu_ids), and duplicating device 0 in the list makes that
+# check pass on a 1-GPU pod. Capacity stopgap; the 2-GPU layout is the
+# intended production topology. We tried the 32 GB 5090 first — two 7B
+# bf16 model copies don't fit, so vLLM comes up with negative KV cache.
 # CUDA 12.8 base matches prime-rl v0.5.0 pins (torch 2.10 cu128 / vLLM 0.14).
 
 FROM nvidia/cuda:12.8.1-devel-ubuntu22.04
