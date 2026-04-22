@@ -158,8 +158,12 @@ def _load_jsonl_dataset(path: str) -> Dataset:
     ds = Dataset.from_json(path)
 
     def _row_to_example(row):
+        # `task` must be a hashable scalar: prime-rl's buffer dedups via
+        # hash_keys=['task', 'prompt'] (see orchestrator.stdout) and will fail
+        # with `unhashable type: 'dict'` if left to fall back to the row dict.
         return {
             "prompt": row.get("problem_statement", ""),
+            "task": row.get("instance_id", ""),
             "info": row,
         }
 
