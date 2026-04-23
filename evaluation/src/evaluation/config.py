@@ -31,8 +31,10 @@ class EvalConfig:
     swebench_dataset: str = "princeton-nlp/SWE-bench_Verified"
     workspace_root: Path = Path("/workspace")
     # Pre-mirrored target repos live at {git_mirror_root}/{repo_with_slashes_replaced}.
-    # Each rollout shutil.copytree's from there into its own scratch dir.
-    git_mirror_root: Path = Path("/workspace/src")
+    # Each rollout shutil.copytree's from there into its own scratch dir. Baked
+    # under /opt by evaluate.Dockerfile so the /workspace bind mount doesn't
+    # shadow the clone at runtime.
+    git_mirror_root: Path = Path("/opt/repo-cache")
     rollout_workspace_root: Path = Path("/tmp/eval-rollouts")
 
 

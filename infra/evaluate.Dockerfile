@@ -1,7 +1,8 @@
 # Pod B eval image — same pod as train, but without prime-rl/flash-attn pins.
-# Rollouts run in-process via agent.AsyncLocalEnvironment (no docker-in-docker);
-# the fastapi repo is pre-mirrored into /workspace/src/fastapi__fastapi at pod
-# bootstrap so each rollout can shutil.copytree from there.
+# Rollouts run in-process via agent.AsyncLocalEnvironment (no docker-in-docker).
+# The fastapi repo is baked into /opt/repo-cache/fastapi__fastapi (outside the
+# /workspace bind mount so the clone survives runtime) and each rollout
+# shutil.copytree's from there into /tmp/eval-rollouts/<instance_id>.
 
 FROM nvidia/cuda:12.4.1-devel-ubuntu22.04
 
@@ -37,10 +38,18 @@ RUN uv sync --extra gpu
 
 # Bake the fastapi template + its pytest deps into the eval venv so the
 # rollout's `python -m pytest` finds them when invoked via cwd=<scratch-dir>.
-RUN git clone https://github.com/fastapi/fastapi.git /workspace/src/fastapi__fastapi
+# Cloned under /opt (not /workspace) so the compose bind mount doesn't shadow
+# the editable-install target at runtime.
+RUN git clone https://github.com/fastapi/fastapi.git /opt/repo-cache/fastapi__fastapi
 RUN uv pip install \
         --python /app/evaluation/.venv/bin/python \
-        -e /workspace/src/fastapi__fastapi \
+        -e /opt/repo-cache/fastapi__fastapi \
         pytest pytest-asyncio anyio httpx dirty-equals
 
 ENTRYPOINT ["uv", "run", "evaluate"]
+
+CMD ["--swebench-n", "20", \
+     "--checkpoint", "/workspace/checkpoints/final", \
+     "--heldout", "/workspace/datasets/pilot/heldout.jsonl", \
+     "--sessions-root", "/workspace/sessions", \
+     "--heldout-n", "10"]
