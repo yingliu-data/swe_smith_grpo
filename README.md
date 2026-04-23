@@ -1,66 +1,123 @@
 # ML Systems Take-Home — Two-Phase RL Training
 
-Build a system that generates synthetic SWE-Smith-style training data, trains
-`SWE-bench/SWE-agent-LM-7B` with GRPO+ on that data, and evaluates the
-resulting policy. Two pods, three uv projects, shared reward/session
-abstractions, $13 smoke budget.
+Three-pipeline system that (a) attempts synthetic SWE-Smith-style training
+data generation from target-repo PRs, (b) trains `SWE-bench/SWE-agent-LM-7B`
+with GRPO+ via prime-rl on that data, and (c) evaluates the resulting
+policy on SWE-bench Verified + a heldout split. Each pipeline is its own
+Docker image on its own pod, sized to the workload. Three `uv` projects
+share two path-dep libraries (`agent/`, `common/`); $13 smoke budget.
+
+> **Current status — partial.**
+> - **Datagen**: all four variance methods (`lm_modify`, `lm_rewrite`,
+>   `procedural`, `pr_mirror`) returned **0 valid candidates** on the
+>   fastapi target — F2P/P2P validation gated them all out. Fell back to
+>   pulling bug-fix PRs directly from `fastapi/fastapi` and using them as
+>   the SWE-bench-format dataset.
+> - **Training**: GRPO smoke with 16 samples produced **0 reward across
+>   all rollouts**. Prime-rl `MultiTurnEnv` integration is the leading
+>   suspect; `common/reward.py` is unit-tested and green.
+> - **Eval**: wired end-to-end, clean once the fastapi template-path bug
+>   in `evaluate.Dockerfile` is rebuilt.
 
 ## What runs where
 
-| Pod | Hardware | Phase | Project | Wall-clock |
-|---|---|---|---|---|
-| A | CPU, 8 vCPU, 32 GB | Data gen | `datagen/` | ~2 hr |
-| B | 1× H100 SXM (privileged) | Training + Eval | `training/`, `evaluation/` | ~3.5 hr train + ~25 min eval |
+Three pods, one per pipeline. Each mounts the same `/workspace` network
+volume for dataset → checkpoint → session hand-off across stages.
 
-Pod C (L40S-eval) was considered and rejected: same-pod eval saves ~$0.65 and
-avoids a second volume re-attach + vLLM cold-start. See §Trade-offs.
+| # | Pipeline   | Pod hardware                     | Image                       | Project       | Wall-clock |
+| - | ---------- | -------------------------------- | --------------------------- | ------------- | ---------- |
+| 1 | Datagen    | CPU, 8 vCPU, 32 GB               | `infra/datagen.Dockerfile`  | `datagen/`    | ~2 hr      |
+| 2 | Training   | 1× RTX PRO 6000 Blackwell, 96 GB | `infra/train.Dockerfile`    | `training/`   | ~3.5 hr    |
+| 3 | Evaluation | 1× RTX 5090, 24 GB               | `infra/evaluate.Dockerfile` | `evaluation/` | ~25 min    |
 
-## Layout
+Training needs the 96 GB Blackwell to fit 7B bf16 + LoRA optimiser +
+activations (seq=16384) + vLLM KV cache + vLLM weight copy — the 5090
+can't (commit `28a124e`). Training is 1-GPU colocated: prime-rl trainer
+and vLLM share the card via the `CUDA_VISIBLE_DEVICES="0,0"` alias
+prime-rl's launcher accepts. The dedicated trainer/inference split over
+≥2 GPUs is the intended production topology. Eval runs only vLLM
+inference so the 5090 is sufficient and ~$2/hr cheaper.
+
+## Project structure
 
 ```
 ml_systems/
-├── agent/        # path-dep: Environment ABC + Local/Docker implementations
-├── common/       # path-dep: reward (6 defenses), tool_surface, session, config
-├── datagen/      # uv project #1 — lockfile #1 (CPU)
-├── training/     # uv project #2 — lockfile #2 (H100, prime-rl)
-├── evaluation/   # uv project #3 — lockfile #3 (H100, no prime-rl)
-└── infra/        # Dockerfiles, compose files, runpod-notes, supervisor
+├── agent/                              # path-dep: async Environment ABC + impls
+│   ├── pyproject.toml
+│   └── src/agent/
+│       ├── environment.py              # Abstract 7-method async Environment contract
+│       ├── local_env.py                # Sync subprocess impl (datagen PR validation)
+│       ├── async_local_env.py          # asyncio impl (train + eval rollouts, in-process)
+│       ├── docker_env.py               # Containerised impl (reward-defense #1/#2 land here)
+│       └── models.py                   # TaskSpec / ToolCall / ToolResult / EvaluationResult
+│
+├── common/                             # path-dep: reward + session + tool dispatch
+│   ├── pyproject.toml
+│   └── src/common/
+│       ├── reward.py                   # compute_reward + DefenseEvent (per-eval gates #4–6)
+│       ├── tool_surface.py             # Tool schema + dispatch(ToolCall, Environment)
+│       ├── config.py                   # Cross-project knob types
+│       ├── ids.py, ipc.py, logging.py
+│       └── session/                    # Shared session-dir layout
+│           ├── session_dir.py          # trace.jsonl + tickets/ + manifests/
+│           ├── manifest.py             # Hash-verified output manifest
+│           ├── ticket.py               # Audit tickets (agent, eval, train)
+│           ├── memory.py
+│           └── state.py                # FSM transitions for session lifecycle
+│
+├── datagen/                            # uv project #1 — synthetic datagen, lockfile #1
+│   ├── pyproject.toml
+│   └── src/datagen/
+│       ├── pipeline.py                 # Top-level asyncio driver
+│       ├── pilot_gen.py                # PR → 4-method × T=15 candidate fan-out
+│       ├── methods/                    # lm_modify, lm_rewrite, procedural, pr_mirror
+│       │                               # (all 4 yielded 0 valid candidates — see §Current status)
+│       ├── nebius_client.py            # Qwen3-30B-A3B-Instruct-2507 API wrapper
+│       ├── validator.py                # F2P/P2P gate via LocalWorkspaceEnvironment
+│       ├── repo_manager.py             # Clone + pinned checkout of target repos
+│       ├── writers/swebench_jsonl.py   # Emits pilot.jsonl + heldout.jsonl
+│       ├── yield_logger.py             # yield.csv audit trail
+│       └── config.py
+│
+├── training/                           # uv project #2 — trainer, lockfile #2, prime-rl v0.5.0
+│   ├── pyproject.toml
+│   └── src/
+│       ├── training/
+│       │   ├── train.py                # CLI wrapper around prime-rl's `rl` launcher
+│       │   ├── checkpoint.py           # save / list / prune + hash-manifest integrity
+│       │   ├── watchdog.py             # Stall detector (no step progress)
+│       │   ├── session_logger.py       # trace.jsonl writer
+│       │   ├── config.py
+│       │   └── configs/
+│       │       ├── train.toml          # Trainer (GRPO+, LoRA, seq=16384)
+│       │       ├── orch.toml           # Prime-rl orchestrator (G=4 rollouts)
+│       │       └── infer.toml          # vLLM colocation config
+│       └── swe_agent_env/
+│           └── __init__.py             # verifiers `MultiTurnEnv` wrapping AsyncLocalEnvironment
+│                                       # (top-level package: verifiers resolves by import name)
+│
+├── evaluation/                         # uv project #3 — eval, lockfile #3, no prime-rl
+│   ├── pyproject.toml
+│   └── src/evaluation/
+│       ├── eval_cli.py                 # `uv run evaluate` entry
+│       ├── runner.py                   # SWE-bench-Verified (n=20) + heldout (n=10) driver
+│       ├── rollout.py                  # AsyncLocalEnvironment rollout → common.reward.compute_reward
+│       ├── sample.py                   # Deterministic random.Random(42) sampler
+│       ├── vllm_server.py              # Re-launches vLLM (prefix-caching on, T=0)
+│       └── config.py
+│
+└── infra/
+    ├── datagen.Dockerfile              # CPU pod image
+    ├── train.Dockerfile                # Training pod (cu128, prime-rl, flash-attn, fastapi template)
+    ├── evaluate.Dockerfile             # Eval pod (cu124, vLLM, fastapi template at /opt/repo-cache)
+    ├── docker-compose.datagen.yml
+    ├── docker-compose.train.yml
+    └── docker-compose.evaluate.yml
 ```
 
-Three lockfiles because `torch>=2.5 + flash-attn-3 + prime-rl` conflicts with
-CPU datagen, and eval doesn't need prime-rl/flash-attn. Path deps share
-`agent/` and `common/` without duplication.
+## Running
 
-## Reward defenses (6-layer)
-
-Split into **structural** (impossible to breach without breaking infra) and
-**per-eval gates** (checked at rollout finalise). The structural layer makes
-the eval gates' failure modes infrastructurally unreachable, which is how we
-reduced v3's 9-defense proposal to 6.
-
-| # | Type | Defense | Enforced in |
-|---|---|---|---|
-| 1 | Structural | Read-only test mounts + edit-file test-glob allowlist | `agent/docker_env.py` |
-| 2 | Structural | Rollout container `--network none` | `agent/docker_env.py` |
-| 3 | Structural | Step (20) / token (16K) / wall (120s) budgets | Container + caller |
-| 4 | Per-eval | Base-commit `git rev-parse` before ≡ after → else reward=0 | `common/reward.py` |
-| 5 | Per-eval | `git apply --check` on final diff → else reward=0 | `common/reward.py` |
-| 6 | Per-eval | F2P ∧ ¬P2P-regression → reward=1 | `common/reward.py` |
-
-Each per-eval defense has a failing-fixture unit test in
-`training/tests/test_reward_defenses.py`.
-
-## GRPO correctness — group failure
-
-Prime-rl / verifiers drives G parallel rollouts and handles group-failure
-semantics internally; missing rollouts poison group-relative advantage, so
-the whole group gets discarded rather than fire-and-forget. Our
-`SWEAgentEnv` (in `training/src/swe_agent_env/__init__.py`) propagates
-rollout exceptions up to the verifiers orchestrator unchanged.
-
-## Run
-
-### Local (pre-RunPod smoke)
+### Local pre-pod smoke
 
 ```bash
 cd agent       && uv sync && uv run pytest tests -q   # 2 passed, 1 skipped (docker-gated)
@@ -70,122 +127,135 @@ cd ../training && uv sync && uv run pytest tests -q   # 22 passed
 cd ../evaluation && uv sync && uv run pytest tests -q # 12 passed
 ```
 
-(GPU deps are behind `[gpu]` extras so tests run on macOS/CPU. Docker-path
-tests require `DOCKER_TESTS=1` and a live daemon.)
+GPU deps sit behind `[gpu]` extras so tests run on macOS/CPU. Docker-path
+tests require `DOCKER_TESTS=1` and a live daemon.
 
-> `_old/` contains the previous iteration scratch; it's gitignored and can be
-> removed with `rm -rf _old/` once you've confirmed the new tree works.
+### Pod provisioning (RunPod)
 
-### Pod provisioning & sync (RunPod)
+`runpodctl`'s quickstart CLI doesn't expose `--privileged`, volume-mount,
+or env-var flags, so each pod is built as a template in the web UI. Shared
+across all three: 250 GB network volume at `/workspace`; env vars
+`NEBIUS_API_KEY`, `HF_TOKEN`, `WANDB_API_KEY`.
 
-**First-time setup — web UI.** `runpodctl`'s quickstart CLI doesn't expose
-`--privileged`, volume-mount, docker-socket bind-mount, or env-var flags, so
-the first pod has to be built as a template in the web UI. Required settings:
+| Pod        | Hardware                         | Privileged                        | Image                       |
+| ---------- | -------------------------------- | --------------------------------- | --------------------------- |
+| Datagen    | CPU, 8 vCPU, 32 GB               | **on** (Docker for PR validation) | `infra/datagen.Dockerfile`  |
+| Training   | 1× RTX PRO 6000 Blackwell, 96 GB | off (rollouts in-process)         | `infra/train.Dockerfile`    |
+| Evaluation | 1× RTX 5090, 24 GB               | off (rollouts in-process)         | `infra/evaluate.Dockerfile` |
 
-- Privileged mode **on** (required for docker-in-docker during rollouts)
-- Bind-mount host `/var/run/docker.sock` (avoids nested DinD — simpler + faster)
-- 500 GB network volume mounted at `/workspace`
-- Env vars: `NEBIUS_API_KEY`, `HF_TOKEN`, `WANDB_API_KEY`
-- Image: Pod A uses `infra/datagen.Dockerfile`; Pod B uses `infra/train.Dockerfile`
+**Sync.** Mutagen two-way per pod (sessions: `<PROJECT>-{datagen,train,eval}`)
+plus a one-way remote→local session for `/workspace/sessions/` outputs.
 
-**Subsequent pods — CLI.** Once the template exists, iterate with
-`runpodctl pod create --template-id <id>` → `runpodctl ssh info $POD_ID` for
-the SSH string. Full flags in `infra/runpod-notes.md`.
+**Iteration.** Edit on laptop → Mutagen pushes to active pod → `ssh` in
+and run `docker compose -f infra/docker-compose.<stage>.yml up`. Session
+dirs under `/workspace/sessions/` stream back for inspection of
+`trace.jsonl`, tickets, rollouts.
 
-**Sync (code):** Mutagen two-way (session: `<PROJECT_NAME>`)
-**Sync (outputs):** Mutagen one-way remote→local (session: `<PROJECT_NAME>-output`)
-Changes made locally or remotely are automatically synced.
+## Design decisions
 
-**Test loop.** Edit on laptop → Mutagen pushes to pod → `ssh` in and run
-`docker compose -f infra/docker-compose.<datagen|train|evaluate>.yml up` →
-session dirs under `/workspace/sessions/` stream back to the laptop for local
-inspection of `trace.jsonl`, tickets, and rollouts.
+**Three-pod hardware split.** See §What runs where. Net saves ~$3.50 on
+the eval window vs keeping the Blackwell idle, at the cost of a second
+vLLM cold-start and a volume reattach.
 
-### Pod A — datagen
+**Three separate lockfiles.** `torch≥2.5 + flash-attn-3 + prime-rl`
+conflicts with CPU datagen; eval doesn't need prime-rl/flash-attn. Path
+deps (`agent/`, `common/`) shared via `[tool.uv.sources]` without
+duplication.
 
-```bash
-docker compose -f infra/docker-compose.datagen.yml up datagen
-# → /workspace/datasets/pilot/{pilot.jsonl,heldout.jsonl,harbor/}
-# → /workspace/docker-cache/*.tar.gz
-```
+**Rollouts run in-process on GPU pods.** Train and eval both use
+`agent.AsyncLocalEnvironment` with `shutil.copytree` from a baked-in
+template repo (`/opt/repo-cache/<slug>/`) into per-rollout scratch dirs
+(`/tmp/<train|eval>-rollouts/<id>/`). No docker-in-docker, no privileged
+mode on the GPU pods. Only datagen runs Docker — for the containerised
+PR-replay path used by `validator.py`.
 
-### Pod B — train + eval
+**G=4, not G=8** (deliberate departure from `manual_prompts.md`).
+7B bf16 (14 GB) + LoRA optim (~0.3) + activations (~10, seq=16384 w/
+grad-ckpt) + vLLM KV (~18 at G=4) + vLLM weights (~14) ≈ 56 GB. G=8
+requires a second card for prime-rl's trainer/inference split.
 
-```bash
-docker load < /workspace/docker-cache/*.tar.gz
-docker compose -f infra/docker-compose.train.yml up train
-# ...kill-test at step 12 per infra/runpod-notes.md...
-docker compose -f infra/docker-compose.train.yml down
-docker compose -f infra/docker-compose.evaluate.yml up evaluate
-# → /workspace/sessions/eval-*/logs/{summary.json,results.jsonl}
-```
+**SWE-bench Verified (full, n=20)** rather than Verified Lite (second
+deliberate departure from `manual_prompts.md`): the 500-instance set gives
+tighter confidence intervals on the 20-instance sample.
+
+**Group-failure semantics.** Prime-rl / verifiers drives G parallel
+rollouts and discards whole groups when any rollout is missing — missing
+members poison group-relative advantage. `SWEAgentEnv`
+(`training/src/swe_agent_env/__init__.py`) propagates rollout exceptions
+up to the verifiers orchestrator unchanged.
+
+**Heldout split from datagen.** 10 instances reserved *before* training
+via `random.Random(42).sample()` and never written to `pilot.jsonl`.
+Split discipline survives the raw-PR fallback; corpus is just smaller.
+
+**Mock-free tests.** `common.reward` is pure-Python so tested directly;
+Docker paths are exercised via `DOCKER_TESTS=1` opt-in against a live
+daemon. No `MagicMock` — keeps defense-test coverage anchored to real
+container behaviour.
 
 ## Cost (smoke)
 
-| Item | Cost |
-|---|---|
-| Pod A (CPU) × 2 hr | $0.20 |
-| Pod B (H100) × 3.9 hr | $10.49 |
-| Nebius API (~1K calls) | $1.00 |
-| 500 GB volume × 1 mo | $1.40 |
-| **Total** | **~$13.10** (buffer ~$6.90 in $20 envelope) |
-
-
-
-## Discrepancies with `manual_prompts.md`
-
-Two deliberate departures, with reasoning:
-
-1. **G=4 (not G=8)**: GPU-memory fit on 1× H100. 7B bf16 (14 GB) + LoRA
-   optimiser (~0.3 GB) + activations (~10 GB, seq=16384 w/ grad-ckpt) + vLLM KV
-   cache (~18 GB at G=4) + weights in vLLM (~14 GB) ≈ 56 GB. G=8 would need
-   2× H100 for the prime-rl trainer/inference split, which the full profile
-   specifies.
-2. **SWE-bench Verified (full, sample 20)** rather than Verified Lite: the full
-   500-instance set gives tighter confidence intervals on the 20-instance
-   sample.
-
-## Trade-offs
-
-- **One pod for train+eval** saves ~$0.65 and a second vLLM cold-start, at the
-  cost of coupling train to eval config drift. Mitigated by re-launching vLLM
-  with distinct configs (prefix caching + greedy for eval).
-- **Mock-free tests**: `common.reward` is pure-Python so tested directly; the
-  Docker paths are exercised via `DOCKER_TESTS=1` opt-in because they need a
-  live daemon. No `MagicMock` in the test suite — that was what let us keep
-  defense-test coverage high without drifting from real container behaviour.
-- **Heldout split from datagen**: 10 of the 40–80 generated instances are
-  reserved *before* training via `random.Random(42).sample()` and never appear
-  in `pilot.jsonl`. README below has "no leakage" assertion.
-
-## Cut-list if strictly time-boxed to 5 hr
-
-| Drop | Saves | Loses |
-|---|---|---|
-| Three lockfiles → one workspace | 30 min | CPU/GPU dep isolation |
-| `common/session/*` → `shared.py` | 1 hr | Ticket audit, manifest verify |
-| Watchdog + supervisor | 30 min | Stall recovery |
-| Heldout eval half, SWE-bench only | 30 min | In-dist sanity signal |
+| Item                                 | Cost    |
+| ------------------------------------ | ------- |
+| Datagen pod (CPU) × 2 hr             | $0.20   |
+| Training pod (RTX PRO 6000) × 3.5 hr | $9.45   |
+| Eval pod (RTX 5090) × 0.5 hr         | $0.25   |
+| Nebius API (~1K calls)               | $1.00   |
+| 250 GB volume × 1 mo (prorated)      | $1.40   |
+| **Total**                            | **~$12.30** |
 
 ## Known issues
 
-- **prime-rl MultiTurnEnv contract** moves between releases; our
-  `swe_env.py` is pinned to a specific prime-rl commit in
-  `training/pyproject.toml`. This is the highest-risk integration.
-- **Nebius seed** is best-effort (provider load balancing); `yield.csv` will
-  vary ±1–2 candidates per method per run.
-- **OOM contingency**: if the first run OOMs from fragmentation, drop G=4→G=2
-  or seq=16384→8192. Plan documents this.
+- **Training GRPO smoke returns 0 reward across 16 rollouts.** Open;
+  likely suspects in priority order:
+  1. `SWEAgentEnv` tool-call parsing diverging from what prime-rl's
+     `MultiTurnEnv` emits — the agent never successfully calls `evaluate`,
+     so `final_head` stays on `base_commit` and defense #4 zeros reward.
+  2. `AsyncLocalEnvironment`'s `shutil.copytree` vs prime-rl's rollout
+     worker concurrency — races on the same scratch dir clobber each
+     other.
+  3. Reward arithmetic itself — ruled out: `common/tests/test_reward.py`
+     is green on the same inputs.
+- **Datagen 0-yield.** All four variance methods gated out by F2P/P2P
+  validation on fastapi. Raw-PR fallback works, but the training corpus
+  has no synthetic variance — every instance is a real merged PR, so
+  memorisation risk is higher than intended.
+- **prime-rl `MultiTurnEnv` contract** moves between releases;
+  `swe_agent_env/__init__.py` is pinned via `PRIME_RL_REV` in
+  `infra/train.Dockerfile`. Highest-risk integration — see training
+  failure above.
+- **OOM contingency.** If training OOMs from fragmentation: drop
+  G=4 → G=2 or seq=16384 → 8192.
 
-## What I would do with more time
+## Things to improve
 
-- 2× H100 full profile with proper trainer/inference split (prime-rl
-  orchestrator over two nodes).
-- Batched SWE-Smith corpus hydration from the 50K HF dataset; current plan
-  skips it because the ~295 GB of per-repo images doesn't fit the $20
-  envelope.
-- Hydra-style config composition for `train.toml` / `orch.toml` / `infer.toml`
-  so sweep experiments don't require three separate file edits.
-- Reward function v2: LLM-judge of "did the agent do the minimal thing"
-  (shorter diffs → higher reward) to combat reward hacking via complexity
-  bloat. Requires its own defense suite.
+1. **Task cleaning and filtering.** The raw-PR fallback corpus is noisy
+   — docs-only PRs, style-only diffs, and PRs whose tests don't exercise
+   the fix all survive into `pilot.jsonl`. A filter pass (LLM-judge or
+   heuristic on diff shape + test coverage) before training is probably
+   the cheapest way to move the 0-reward smoke off zero.
+2. **Data generation spawns in a dedicated test-environment container to
+   filter.** `datagen/src/datagen/validator.py` runs F2P/P2P via
+   `LocalWorkspaceEnvironment` (host subprocess + pytest), so per-candidate
+   Python and system deps inherit from the datagen image. A per-candidate
+   container pinned to the target repo's own environment (fastapi's CI
+   matrix, etc.) would isolate env-mismatch failures from real candidate
+   failures — plausibly a large contributor to the 0-yield across all
+   four variance methods.
+3. **Allow different coding environments.** The whole pipeline is wired
+   to fastapi: `/opt/repo-cache/fastapi__fastapi`, fastapi's pytest deps
+   baked into the eval venv, `repo_slug` hardcoded. Config-driven
+   `test_command`, per-repo template paths, and per-repo pytest plugin
+   sets would turn this from a one-repo demo into a SWE-bench-scale
+   harness.
+4. **Distribute G across multiple GPUs.** Current 1-GPU colocation
+   (`CUDA_VISIBLE_DEVICES="0,0"`, G=4) is a stopgap. Prime-rl's intended
+   topology is a dedicated trainer/inference split over ≥2 GPUs, which
+   also lifts the G=8 memory ceiling and cuts the trainer↔vLLM weight-copy
+   stall every step.
+5. **Local prod-like environment for pre-build testing.** Every
+   Dockerfile or compose change needs a full `docker build` (minutes on
+   cu128/flash-attn) before the failure surfaces. A devcontainer or a
+   compose overlay with editable path-dep mounts would catch bugs like
+   the `/workspace/src/fastapi__fastapi` clone-path issue in
+   `evaluate.Dockerfile` in seconds instead of minutes.
