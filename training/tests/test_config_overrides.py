@@ -65,3 +65,27 @@ def test_batch_size_must_divide_by_group(tmp_path):
             CFG_ROOT, tmp_path / "cfg",
             {"batch_size": 10, "rollouts_per_example": 4},
         )
+
+
+async def test_run_with_overrides_exercises_full_wrapper(tmp_path):
+    """Drive _run end-to-end with a stub prime-rl command.
+
+    Regression: the override-announcement line in _run once called a helper
+    that only exists in datagen (_say) and NameError'd on the pod — unit
+    tests on _materialize_configs alone can't catch bugs in _run's body.
+    """
+    import argparse
+
+    from training.train import _run
+
+    args = argparse.Namespace(
+        dataset=tmp_path / "fake.jsonl", profile="smoke", resume=None,
+        output_dir=tmp_path / "ckpt", sessions_root=tmp_path / "sess",
+        prime_rl="python -c pass",  # resolvable stub; exits 0 immediately
+        seq_len=2048, batch_size=None, rollouts_per_example=None,
+        max_steps=2, max_async_level=None, max_off_policy_steps=None,
+    )
+    assert await _run(args) == 0
+    cfg_dirs = list((tmp_path / "sess").glob("train-*/configs"))
+    assert len(cfg_dirs) == 1
+    assert tomllib.loads((cfg_dirs[0] / "orch.toml").read_text())["seq_len"] == 2048

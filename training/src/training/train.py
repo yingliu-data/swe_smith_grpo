@@ -130,7 +130,8 @@ async def _run(args: argparse.Namespace) -> int:
     cfg_root = _materialize_configs(
         Path(__file__).parent / "configs", session.root / "configs", overrides)
     if overrides:
-        _say(f"config overrides {overrides} -> {cfg_root}")
+        print(f"[train] config overrides {overrides} -> {cfg_root}",
+              file=sys.stderr, flush=True)
     cmd = [
         *cmd_parts,
         "--trainer", f"@{cfg_root / 'train.toml'}",
