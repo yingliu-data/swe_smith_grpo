@@ -18,14 +18,11 @@ services:
       - PYTHONUNBUFFERED=1
     volumes:
       - /workspace:/workspace
-      # docker.sock so the `docker save` step at the end of the pipeline can
-      # write the per-repo image tarballs to /workspace/docker-cache/.
-      - /var/run/docker.sock:/var/run/docker.sock
     working_dir: /app/datagen
     command:
       - "--repo"
       - "fastapi/fastapi"
       - "--t"
       - "15"
-      - "--output-dir"
+      - "--output-root"
       - "/workspace/datasets/pilot"

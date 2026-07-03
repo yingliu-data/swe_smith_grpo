@@ -12,9 +12,9 @@ NEBIUS_MODEL = "Qwen/Qwen3-30B-A3B-Instruct-2507"
 
 @dataclass(slots=True)
 class DatagenConfig:
-    repo: str = "fastapi/fastapi"
+    repo: str  # no default — every entry point must pick a target explicitly
     t_per_method: int = 5
-    base: bool = True
+    base: bool = False
     validation_timeout_seconds: int = 120
     llm_concurrency: int = 8
     docker_concurrency: int = 4
@@ -31,9 +31,10 @@ class DatagenConfig:
 
     @classmethod
     def from_env(cls) -> "DatagenConfig":
-        kw: dict = {}
-        if v := os.environ.get("DATAGEN_REPO"):
-            kw["repo"] = v
+        repo = os.environ.get("DATAGEN_REPO")
+        if not repo:
+            raise ValueError("DATAGEN_REPO must be set (e.g. 'fastapi/fastapi')")
+        kw: dict = {"repo": repo}
         if v := os.environ.get("DATAGEN_T"):
             kw["t_per_method"] = int(v)
         if v := os.environ.get("DATAGEN_OUTPUT"):

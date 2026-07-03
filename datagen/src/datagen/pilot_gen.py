@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import sys
 import traceback
+from dataclasses import replace
 from pathlib import Path
 
 from common.config import apply_seed
@@ -21,17 +22,20 @@ def _say(msg: str) -> None:
 
 
 def _parse_args() -> argparse.Namespace:
+    # DatagenConfig is the single source of truth for defaults; a template
+    # instance keeps the two from silently diverging.
+    d = DatagenConfig(repo="")
     p = argparse.ArgumentParser(prog="datagen", description="SWE-Smith pilot data generation")
-    p.add_argument("--repo", default="fastapi/fastapi")
-    p.add_argument("--t", type=int, default=5, dest="t_per_method")
-    p.add_argument("--base", action=argparse.BooleanOptionalAction, default=True, help="SWE-Smith methods has 0 yield, shift to standard diff extraction")
-    p.add_argument("--heldout", type=int, default=10)
-    p.add_argument("--llm-concurrency", type=int, default=8)
-    p.add_argument("--docker-concurrency", type=int, default=4)
-    p.add_argument("--max-prs", type=int, default=None)
-    p.add_argument("--output-root", type=Path, default=Path("/workspace/datasets/pilot"))
-    p.add_argument("--repos-root", type=Path, default=Path("/workspace/repos"))
-    p.add_argument("--sessions-root", type=Path, default=Path("/workspace/sessions"))
+    p.add_argument("--repo", required=True, help="target repo, e.g. fastapi/fastapi")
+    p.add_argument("--t", type=int, default=d.t_per_method, dest="t_per_method")
+    p.add_argument("--base", action=argparse.BooleanOptionalAction, default=d.base, help="SWE-Smith methods has 0 yield, shift to standard diff extraction")
+    p.add_argument("--heldout", type=int, default=d.heldout_count)
+    p.add_argument("--llm-concurrency", type=int, default=d.llm_concurrency)
+    p.add_argument("--docker-concurrency", type=int, default=d.docker_concurrency)
+    p.add_argument("--max-prs", type=int, default=d.max_prs)
+    p.add_argument("--output-root", type=Path, default=d.output_root)
+    p.add_argument("--repos-root", type=Path, default=d.repos_root)
+    p.add_argument("--sessions-root", type=Path, default=d.sessions_root)
     p.add_argument("--offline", action="store_true", help="skip Nebius; only procedural+pr_mirror run")
     p.add_argument("--dry-run", action="store_true", help="stub PR enumeration; just verify wiring")
     return p.parse_args()
@@ -53,15 +57,7 @@ async def _run(cfg: DatagenConfig) -> int:
         _say("dry_run complete, exiting 0")
         return 0
     methods = tuple(m for m in cfg.methods if not (cfg.offline and m.startswith("lm_")))
-    cfg = DatagenConfig(
-        repo=cfg.repo, t_per_method=cfg.t_per_method,
-        validation_timeout_seconds=cfg.validation_timeout_seconds,
-        llm_concurrency=cfg.llm_concurrency, docker_concurrency=cfg.docker_concurrency,
-        heldout_count=cfg.heldout_count, seed=cfg.seed, output_root=cfg.output_root,
-        repos_root=cfg.repos_root, sessions_root=cfg.sessions_root,
-        docker_cache_root=cfg.docker_cache_root,
-        methods=methods, offline=cfg.offline, dry_run=cfg.dry_run, max_prs=cfg.max_prs,
-    )
+    cfg = replace(cfg, methods=methods)
     pipeline = Pipeline(cfg, trace=trace)
     _say("pipeline.run() starting")
     records = await pipeline.run()

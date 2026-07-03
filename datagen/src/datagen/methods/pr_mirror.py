@@ -4,17 +4,8 @@ import random
 
 from unidiff import PatchSet
 
+from ..validator import _is_test_path
 from .base import BaseMutationMethod, Candidate, Context
-
-
-def _is_test_path(p: str) -> bool:
-    parts = p.split("/")
-    name = parts[-1] if parts else ""
-    return (
-        any(seg in ("tests", "test") for seg in parts)
-        or name.startswith("test_")
-        or name.endswith("_test.py")
-    )
 
 
 def _render_file_section(path: str, hunks) -> str:

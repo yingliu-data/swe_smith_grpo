@@ -7,6 +7,7 @@ import re
 from unidiff import PatchSet
 
 from ..nebius_client import NebiusClient
+from ..validator import _is_test_path
 from .base import BaseMutationMethod, Candidate, Context
 
 _SYSTEM_MODIFY = (
@@ -61,16 +62,6 @@ _EDIT_RE = re.compile(
     r'\s*</edit>',
     re.DOTALL,
 )
-
-
-def _is_test_path(p: str) -> bool:
-    parts = p.split("/")
-    name = parts[-1] if parts else ""
-    return (
-        any(seg in ("tests", "test") for seg in parts)
-        or name.startswith("test_")
-        or name.endswith("_test.py")
-    )
 
 
 def _relevant_files(reference_patch: str) -> list[str]:

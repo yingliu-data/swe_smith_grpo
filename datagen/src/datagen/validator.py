@@ -4,6 +4,7 @@ import asyncio
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -26,29 +27,73 @@ class ValidationResult:
 def extract_f2p_nodeids(test_patch: str) -> list[str]:
     """Extract pytest node-ids for newly added test functions from a test_patch.
 
-    Heuristic: for every test file in the patch, scan added lines for `def test_*(`
-    and emit nodeids of form ``<path>::<name>``.
+    Heuristic: for every test file in the patch, scan hunk lines for added
+    `def test_*(`, tracking enclosing ``class`` statements by indentation so
+    class-based tests get fully qualified node-ids. Indented test defs whose
+    enclosing class never appears in the hunks are dropped — an unqualified
+    node-id for a method cannot be collected by pytest.
     """
     out: list[str] = []
+    test_def = re.compile(r"^(\s*)(?:async\s+)?def\s+(test_\w+)\s*\(")
+    class_def = re.compile(r"^(\s*)class\s+(\w+)")
     ps = PatchSet(test_patch)
-    test_def = re.compile(r"^\+\s*(?:async\s+)?def\s+(test_\w+)\s*\(")
     for pf in ps:
         path = pf.path
         if not path.endswith(".py"):
             continue
+        class_stack: list[tuple[int, str]] = []
         for hunk in pf:
+            # git puts the enclosing declaration in the hunk section header
+            # (`@@ ... @@ class Foo:`) — often the only place the class of an
+            # appended test method is visible.
+            sh = class_def.match(hunk.section_header or "")
+            if sh:
+                indent = len(sh.group(1).expandtabs())
+                while class_stack and class_stack[-1][0] >= indent:
+                    class_stack.pop()
+                class_stack.append((indent, sh.group(2)))
             for line in hunk:
+                if line.is_removed:
+                    continue
+                text = line.value
+                cm = class_def.match(text)
+                if cm:
+                    indent = len(cm.group(1).expandtabs())
+                    while class_stack and class_stack[-1][0] >= indent:
+                        class_stack.pop()
+                    class_stack.append((indent, cm.group(2)))
+                    continue
                 if not line.is_added:
                     continue
-                m = test_def.match(f"+{line.value}" if not line.value.startswith("+") else line.value)
-                if m:
-                    out.append(f"{path}::{m.group(1)}")
+                m = test_def.match(text)
+                if not m:
+                    continue
+                indent = len(m.group(1).expandtabs())
+                while class_stack and class_stack[-1][0] >= indent:
+                    class_stack.pop()
+                if indent and not class_stack:
+                    continue
+                qualifier = "::".join(name for _, name in class_stack)
+                out.append(f"{path}::{qualifier}::{m.group(2)}" if qualifier else f"{path}::{m.group(2)}")
     return out
 
 
 def split_reference_patch(reference_patch: str) -> tuple[str, str]:
-    """Split a SWE-bench reference diff into (src_patch, test_patch)."""
-    ps = PatchSet(reference_patch)
+    """Split a SWE-bench reference diff into (src_patch, test_patch).
+
+    Returns ("", "") for patches that cannot be used faithfully: unparseable
+    input (unidiff raises more than UnidiffParseError, so trap broadly) or
+    patches touching binary files — unidiff drops 'GIT binary patch' payloads,
+    so re-rendering those sections would silently materialize empty files.
+    """
+    try:
+        ps = PatchSet(reference_patch)
+    except Exception as e:
+        print(f"[datagen] split_reference_patch: skipping unparseable patch ({e})", file=sys.stderr, flush=True)
+        return "", ""
+    if any(pf.is_binary_file for pf in ps):
+        print("[datagen] split_reference_patch: skipping patch with binary files", file=sys.stderr, flush=True)
+        return "", ""
     src_files, test_files = [], []
     for pf in ps:
         if _is_test_path(pf.path):
@@ -83,11 +128,12 @@ class Validator:
         *,
         repo_dir: Path,
         base_commit: str,
-        reference_patch: str,
+        src_patch: str,
+        test_patch: str,
+        f2p: list[str],
         buggy_patch: str,
+        python_bin: str,
     ) -> ValidationResult:
-        src_patch, test_patch = split_reference_patch(reference_patch)
-        f2p = extract_f2p_nodeids(test_patch)
         if not f2p:
             return ValidationResult(passed=False, reason="no F2P tests found in reference test_patch")
         return await asyncio.get_running_loop().run_in_executor(
@@ -95,22 +141,22 @@ class Validator:
             self._validate_sync,
             repo_dir,
             base_commit,
-            reference_patch,
             test_patch,
             src_patch,
             buggy_patch,
             f2p,
+            python_bin,
         )
 
     def _validate_sync(
         self,
         repo_dir: Path,
         base_commit: str,
-        reference_patch: str,
         test_patch: str,
         src_patch: str,
         buggy_patch: str,
         f2p: list[str],
+        python_bin: str,
     ) -> ValidationResult:
         import time
 
@@ -123,7 +169,14 @@ class Validator:
                 repository="validator-local",
                 base_commit=base_commit,
                 instruction="",
-                test_command=["python", "-m", "pytest", "-x", "--tb=short", *f2p],
+                # python_bin comes from the per-(repo, commit) test venv built by
+                # test_env.ensure_test_env — the datagen venv itself does not
+                # have the target repo's dependencies. -B: stages B and C run
+                # against the same files rewritten within the same second and
+                # with equal size, so cached pyc (mtime+size validated) can go
+                # stale between stages and report the wrong verdict.
+                test_command=[python_bin, "-B", "-m", "pytest", "-x", "--tb=short",
+                              "-p", "no:cacheprovider", *f2p],
             )
             try:
                 env.reset(task)

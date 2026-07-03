@@ -130,6 +130,36 @@ cd ../evaluation && uv sync && uv run pytest tests -q # 12 passed
 GPU deps sit behind `[gpu]` extras so tests run on macOS/CPU. Docker-path
 tests require `DOCKER_TESTS=1` and a live daemon.
 
+### Running the datagen image
+
+The datagen container needs **two env keys** passed in with `-e` at run
+time (neither is baked into the image):
+
+| Env var          | Used for                                                | Required?                                                        |
+| ---------------- | ------------------------------------------------------- | ---------------------------------------------------------------- |
+| `NEBIUS_API_KEY` | Qwen3 calls for the `lm_modify`/`lm_rewrite` methods    | Yes in mutation mode (the default). Not needed with `--base` or `--offline`. |
+| `GITHUB_TOKEN`   | GitHub API for PR enumeration + patch downloads         | Strongly recommended — anonymous search is capped at 10 req/min and rate-limits mid-run. |
+
+Pull the CI-built image and run it; `--repo` is required, and outputs land
+under the `/workspace` mount (`pilot.jsonl`, `heldout.jsonl`, `yield.csv`,
+plus `sessions/<id>/logs/trace.jsonl` for debugging):
+
+```bash
+docker run --rm \
+  -e NEBIUS_API_KEY="$NEBIUS_API_KEY" \
+  -e GITHUB_TOKEN="$GITHUB_TOKEN" \
+  -v /path/on/host:/workspace \
+  ghcr.io/yingliu-data/ml-systems-datagen:latest \
+  --repo fastapi/fastapi --t 5 --output-root /workspace/datasets/pilot
+```
+
+The default mode runs the four SWE-Smith mutation methods with F2P
+validation; on first contact with a base commit it builds a cached test
+venv under `/workspace/repos/_envs/` (minutes, once per commit). Add
+`--base` for plain bug-fix-PR diff extraction — no `NEBIUS_API_KEY`
+needed. `docker compose -f infra/docker-compose.datagen.yml up` does the
+same and reads both keys from the host environment.
+
 ### Pod provisioning (RunPod)
 
 `runpodctl`'s quickstart CLI doesn't expose `--privileged`, volume-mount,

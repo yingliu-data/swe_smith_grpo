@@ -7,6 +7,7 @@ from dataclasses import dataclass
 
 from unidiff import PatchSet
 
+from ..validator import _is_test_path
 from .base import BaseMutationMethod, Candidate, Context
 
 # Ordered longer-first so " is not " binds before " is ", etc.
@@ -39,16 +40,6 @@ _BINOP_FLIPS: list[tuple[str, str]] = [
 class _MutationSite:
     lineno: int  # 0-indexed
     kind: str    # "cmp" | "bin"
-
-
-def _is_test_path(p: str) -> bool:
-    parts = p.split("/")
-    name = parts[-1] if parts else ""
-    return (
-        any(seg in ("tests", "test") for seg in parts)
-        or name.startswith("test_")
-        or name.endswith("_test.py")
-    )
 
 
 def _candidate_files(reference_patch: str) -> list[str]:

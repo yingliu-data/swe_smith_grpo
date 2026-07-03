@@ -950,3 +950,31 @@ Check if this project did that correctly.
 3. allow different coding environment
 4. the G=n in GRPO can be distributed in multiple GPUs.
 5. Local prod environment to test before building the docker image
+
+
+
+uv run datagen \
+    --repo fastapi/fastapi \
+    --base \
+    --t 1 \
+    --max-prs 12 \
+    --output-root /tmp/datagen-smoke \
+    --repos-root /tmp/datagen-smoke/repos \
+    --sessions-root /tmp/datagen-smoke/sessions
+
+  Why these args:
+  - --base — diff extraction, no Nebius key or LLM spend (the default is now mutation mode)
+  - --t 1 — only meaningful in mutation mode (trials per method); a no-op with --base
+  - --max-prs 12 — covers PR #14463 (the failure was at position 11/25), so you actually exercise the
+  broken patch
+  - --output-root/--repos-root/--sessions-root — anywhere local (the defaults point at /workspace,
+  which only exists on the pod)
+
+  If the fix works you'll see:
+
+  [datagen] PR 11/12: #14463 base=...
+  [datagen] split_reference_patch: skipping unparseable patch (Unexpected trailing newline character)
+  [datagen] PR #14463: skipping (reference patch unparseable, binary, or without F2P tests)
+  [datagen] PR 12/12: #14512 base=...
+
+  instead of an uncaught traceback.

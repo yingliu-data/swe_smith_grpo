@@ -8,18 +8,17 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# System deps: git (repo cloning), build-essential (for some wheels),
-# docker-cli (datagen calls `docker save` to pre-bake per-repo images).
+# System deps: git (repo cloning), build-essential (for some wheels).
 RUN apt-get update && apt-get install -y --no-install-recommends \
         git \
         build-essential \
         ca-certificates \
         curl \
-        docker.io \
     && rm -rf /var/lib/apt/lists/*
 
-# uv — single static binary, cached across layers.
-COPY --from=ghcr.io/astral-sh/uv:0.5 /uv /usr/local/bin/uv
+# uv — single static binary, cached across layers. Must be new enough to read
+# the committed uv.lock schema (revision 3 needs >= 0.8).
+COPY --from=ghcr.io/astral-sh/uv:0.11 /uv /usr/local/bin/uv
 
 WORKDIR /app
 
@@ -31,6 +30,8 @@ COPY datagen/ /app/datagen/
 WORKDIR /app/datagen
 RUN uv sync --frozen
 
-# Default entrypoint: the CLI. Override at docker-compose level.
-ENTRYPOINT ["uv", "run", "datagen"]
+# Default entrypoint: the CLI (--frozen: never re-resolve at container start).
+# Default mode is SWE-Smith mutation (requires NEBIUS_API_KEY); pass --base
+# for plain diff extraction, which needs no LLM key.
+ENTRYPOINT ["uv", "run", "--frozen", "datagen"]
 CMD ["--repo", "fastapi/fastapi"]
