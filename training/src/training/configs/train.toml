@@ -14,7 +14,12 @@ max_async_level = 1
 
 [model]
 name    = "SWE-bench/SWE-agent-LM-7B"
-seq_len = 8192   # keep ≤ infer.max_model_len; bump to 16384 later if budget allows.
+# 4096 for the 80 GB (A100) colocated deployment: at 8192 the trainer OOM'd in
+# the LM-head backward — a (1, seq_len, 152064) fp32 logits-grad tensor is
+# 4.64 GiB at 8192 with only 2.76 GiB free (trainer 46.5 + vLLM 29.8 of 79.2).
+# The 96 GB budget notes below assumed the RTX PRO 6000; restore 8192 there.
+# MUST equal orch.seq_len; keep ≤ infer.max_model_len.
+seq_len = 4096
 
 # Activation checkpointing: recompute every transformer block on the backward
 # pass.  ~30% compute tax for a large activation-memory cut.  Kept on for the
@@ -26,8 +31,8 @@ ac = { mode = "full", freq = 1 }
 
 
 # LoRA (~0.3% trainable) + ac=full + seq_len=8192 fits on 96 GB alongside
-# vLLM at gpu_memory_utilization=0.75.  If this OOMs, drop seq_len to 4096
-# first, then LoRA rank 16 → 8.
+# vLLM at gpu_memory_utilization=0.75 (4096 on the 80 GB A100 — see [model]).
+# If this still OOMs, drop LoRA rank 16 → 8.
 #
 # `dtype` is NOT a TrainerModelConfig field; mixed precision is controlled
 # via optimization_dtype / reduce_dtype (both default fp32).

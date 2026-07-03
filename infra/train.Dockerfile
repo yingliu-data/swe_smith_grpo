@@ -129,6 +129,10 @@ ENV PATH="/opt/prime-rl/.venv/bin:${PATH}"
 # subprocess env; this ENV is the baseline for anyone running the image
 # outside the training entrypoint (e.g. an exec shell).
 ENV CUDA_VISIBLE_DEVICES="0,0"
+# Reduce allocator fragmentation for the colocated trainer+vLLM squeeze.
+# docker-compose.train.yml sets this too; baked here so plain `docker run`
+# gets the same allocator behaviour.
+ENV PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True"
 
 WORKDIR /app/training
 # Minimal sync for train.py itself (no gpu extras needed here — prime-rl's
