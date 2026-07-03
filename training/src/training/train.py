@@ -7,7 +7,10 @@ import shutil
 import signal
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
+
+import tomli_w
 
 from common.config import apply_seed
 from common.session import SessionDir
@@ -29,7 +32,68 @@ def _parse_args() -> argparse.Namespace:
         default=os.environ.get("PRIME_RL_CMD", "uv run rl"),
         help="command to invoke the prime-rl trainer binary",
     )
+    # Run-time overrides for the baked prime-rl tomls, so a `docker run` can
+    # retune the loop without rebuilding the image (see _materialize_configs).
+    # Defaults of None mean "keep the baked value".
+    g = p.add_argument_group("prime-rl config overrides")
+    g.add_argument("--seq-len", type=int, default=None,
+                   help="context length; kept in sync across train.toml and orch.toml")
+    g.add_argument("--batch-size", type=int, default=None,
+                   help="total rollouts per step (orch.toml)")
+    g.add_argument("--rollouts-per-example", type=int, default=None,
+                   help="GRPO group size G; must divide batch-size (orch.toml)")
+    g.add_argument("--max-steps", type=int, default=None,
+                   help="training steps; kept in sync across train.toml and orch.toml")
+    g.add_argument("--max-async-level", type=int, default=None,
+                   help="rollout/update overlap depth (orch.toml)")
+    g.add_argument("--max-off-policy-steps", type=int, default=None,
+                   help="staleness bound for buffered rollouts (orch.toml)")
     return p.parse_args()
+
+
+_OVERRIDE_KEYS = ("seq_len", "batch_size", "rollouts_per_example",
+                  "max_steps", "max_async_level", "max_off_policy_steps")
+
+
+def _collect_overrides(args: argparse.Namespace) -> dict[str, int]:
+    return {k: v for k in _OVERRIDE_KEYS if (v := getattr(args, k)) is not None}
+
+
+def _materialize_configs(cfg_root: Path, out_root: Path, overrides: dict[str, int]) -> Path:
+    """Apply run-time overrides on top of the baked prime-rl tomls.
+
+    Returns cfg_root untouched when there is nothing to override; otherwise
+    writes patched copies of train/orch/infer.toml under out_root and returns
+    that. Cross-file invariants are enforced structurally: seq_len and
+    max_steps are single flags fanned out to every file that carries them, so
+    the CLI cannot desynchronise train.toml from orch.toml.
+    """
+    if not overrides:
+        return cfg_root
+    cfgs = {name: tomllib.loads((cfg_root / f"{name}.toml").read_text())
+            for name in ("train", "orch", "infer")}
+    if (v := overrides.get("seq_len")) is not None:
+        max_model_len = cfgs["infer"]["model"]["max_model_len"]
+        if v > max_model_len:
+            raise SystemExit(
+                f"--seq-len {v} exceeds infer.toml max_model_len {max_model_len}")
+        cfgs["train"]["model"]["seq_len"] = v
+        cfgs["orch"]["seq_len"] = v
+    if (v := overrides.get("max_steps")) is not None:
+        cfgs["train"]["max_steps"] = v
+        cfgs["orch"]["max_steps"] = v
+    for key in ("batch_size", "rollouts_per_example", "max_async_level",
+                "max_off_policy_steps"):
+        if (v := overrides.get(key)) is not None:
+            cfgs["orch"][key] = v
+    bs, g = cfgs["orch"]["batch_size"], cfgs["orch"]["rollouts_per_example"]
+    if bs % g:
+        raise SystemExit(
+            f"batch_size {bs} is not divisible by rollouts_per_example {g}")
+    out_root.mkdir(parents=True, exist_ok=True)
+    for name, data in cfgs.items():
+        (out_root / f"{name}.toml").write_text(tomli_w.dumps(data))
+    return out_root
 
 
 async def _run(args: argparse.Namespace) -> int:
@@ -37,6 +101,7 @@ async def _run(args: argparse.Namespace) -> int:
     profile = load_profile(args.profile)
     session = _open_or_create_session(args.sessions_root, args.resume)
     log = RunLogger(session)
+    overrides = _collect_overrides(args)
     ticket = log.next_ticket(
         "train.run",
         inputs={
@@ -44,9 +109,11 @@ async def _run(args: argparse.Namespace) -> int:
             "dataset": str(args.dataset),
             "resume": args.resume,
             "output_dir": str(args.output_dir),
+            "overrides": overrides,
         },
     )
-    log.trace.log("train.start", profile=profile.profile, dataset=str(args.dataset))
+    log.trace.log("train.start", profile=profile.profile, dataset=str(args.dataset),
+                  overrides=overrides)
 
     cmd_parts = args.prime_rl.split()
     if _prime_rl_missing(cmd_parts):
@@ -60,7 +127,10 @@ async def _run(args: argparse.Namespace) -> int:
         ticket.finish(state="failed", error=msg)
         return 127
 
-    cfg_root = Path(__file__).parent / "configs"
+    cfg_root = _materialize_configs(
+        Path(__file__).parent / "configs", session.root / "configs", overrides)
+    if overrides:
+        _say(f"config overrides {overrides} -> {cfg_root}")
     cmd = [
         *cmd_parts,
         "--trainer", f"@{cfg_root / 'train.toml'}",

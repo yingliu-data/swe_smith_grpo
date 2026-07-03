@@ -146,11 +146,14 @@ plus `sessions/<id>/logs/trace.jsonl` for debugging):
 
 ```bash
 docker run --rm \
-  -e NEBIUS_API_KEY="$NEBIUS_API_KEY" \
-  -e GITHUB_TOKEN="$GITHUB_TOKEN" \
-  -v /path/on/host:/workspace \
+  -v /workspace:/workspace \
+  -e NEBIUS_API_KEY="TOKEN" \
+  -e GITHUB_TOKEN="TOKEN" \
   ghcr.io/yingliu-data/ml-systems-datagen:latest \
-  --repo fastapi/fastapi --t 5 --output-root /workspace/datasets/pilot
+  --repo fastapi/fastapi \
+  --t 5 \
+  --max-prs 15 \
+  --output-root /workspace/datasets/pilot
 ```
 
 The default mode runs the four SWE-Smith mutation methods with F2P
@@ -159,6 +162,50 @@ venv under `/workspace/repos/_envs/` (minutes, once per commit). Add
 `--base` for plain bug-fix-PR diff extraction — no `NEBIUS_API_KEY`
 needed. `docker compose -f infra/docker-compose.datagen.yml up` does the
 same and reads both keys from the host environment.
+
+### Running the train image
+
+The train image runs the GRPO loop (prime-rl trainer + colocated vLLM) over a
+datagen-produced dataset. It needs a **GPU**, the host `/workspace` mount for
+the dataset and checkpoints, and `--ipc=host` plus a large `/dev/shm` for
+prime-rl's shared-memory IPC:
+
+| Env var         | Used for                                          | Required?                                                                       |
+| --------------- | ------------------------------------------------- | ------------------------------------------------------------------------------- |
+| `HF_TOKEN`      | pulling the base policy model + tokenizer from HF | Recommended — avoids HF rate limits and unlocks gated repos.                     |
+| `WANDB_API_KEY` | streaming metrics to Weights & Biases             | Optional — the image defaults to `WANDB_MODE=offline`; set `-e WANDB_MODE=online` to use it. |
+
+The single-GPU colocation alias (`CUDA_VISIBLE_DEVICES=0,0`) is baked into the
+image, so one physical card is enough. Point `--dataset` at the `pilot.jsonl`
+produced by the datagen image; checkpoints land under the `/workspace` mount:
+
+```bash
+docker run --rm \
+  --gpus all \
+  --ipc=host --shm-size=16g \
+  -v /workspace:/workspace \
+  -e HF_TOKEN="TOKEN" \
+  ghcr.io/yingliu-data/ml-systems-train:latest \
+  --dataset /workspace/datasets/pilot/pilot.jsonl \
+  --profile smoke \
+  --output-dir /workspace/checkpoints \
+  --sessions-root /workspace/sessions
+```
+
+`--profile smoke` is a fast wiring check; `--profile full` runs the real
+schedule. Resume an interrupted run with `--resume latest`.
+`docker compose -f infra/docker-compose.train.yml up` does the same and adds
+the GPU reservation, `HF_HOME`, and offline W&B defaults.
+
+Loop geometry can be retuned per run without rebuilding the image — append
+any of `--seq-len`, `--batch-size`, `--rollouts-per-example`, `--max-steps`,
+`--max-async-level`, `--max-off-policy-steps` to the `docker run` above
+(e.g. `--seq-len 4096 --batch-size 8 --max-steps 3`). They're applied on top
+of the baked prime-rl tomls at start-up; cross-file invariants are enforced
+automatically (`--seq-len` and `--max-steps` fan out to both train.toml and
+orch.toml, `--seq-len` is capped at infer max_model_len, and `--batch-size`
+must divide by `--rollouts-per-example`). The patched tomls land in the
+session dir for provenance.
 
 ### Pod provisioning (RunPod)
 
