@@ -9,6 +9,7 @@ verifiers discovery is by importable module name, not entry-point groups.
 from __future__ import annotations
 
 import asyncio
+import os
 from typing import Any
 
 import verifiers as vf
@@ -21,7 +22,14 @@ from common.tool_surface import ToolSurfaceError, dispatch, parse_tool_call
 __all__ = ["SWEAgentEnv", "load_environment"]
 
 # Baked into the training image at build time (see infra/train.Dockerfile).
-_REPO_CACHE_TEMPLATE = "/opt/repo-cache/fastapi"
+# Repo-agnostic: the image clones an arbitrary TARGET_REPO_URL to
+# /opt/repo-cache/target with its own test venv, kept OUT of prime-rl's venv —
+# installing the target -e into the serving venv once replaced vLLM's fastapi
+# pin with the target's main HEAD and 500'd the whole inference API.
+_REPO_CACHE_TEMPLATE = os.environ.get("SWE_TARGET_TEMPLATE", "/opt/repo-cache/target")
+# Interpreter for the rollout's pytest run — the target venv's python in the
+# image; bare "python" (PATH) as a fallback for unit tests outside it.
+_TARGET_PYTHON = os.environ.get("SWE_TARGET_PYTHON", "python")
 # Ephemeral rollout scratch dir. Not on network storage — local to the
 # training container, recreated per rollout.
 _ROLLOUT_WORKSPACE = "/tmp/rollout-workspace/current"
@@ -151,7 +159,9 @@ def _task_from_row(row: dict[str, Any]) -> TaskSpec:
         repository=row.get("repo", ""),
         base_commit=row.get("base_commit", ""),
         instruction=row.get("problem_statement", ""),
-        test_command=["python", "-m", "pytest", "-x", "--tb=short", *f2p],
+        # _TARGET_PYTHON, not bare "python": PATH in the training image
+        # resolves to prime-rl's venv, which must stay free of target deps.
+        test_command=[_TARGET_PYTHON, "-m", "pytest", "-x", "--tb=short", *f2p],
         reference_patch=row.get("patch"),
         metadata={
             **(row.get("metadata") or {}),

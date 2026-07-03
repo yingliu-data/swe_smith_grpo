@@ -79,22 +79,36 @@ RUN UV_PROJECT=/opt/prime-rl uv pip install \
 RUN /opt/prime-rl/.venv/bin/python -c "import flash_attn, ring_flash_attn; print(f'flash_attn {flash_attn.__version__}')"
 
 # ---------------------------------------------------------------------------
-# Rollouts run locally in this container (no per-rollout Docker). Bake the
-# target repo + its test deps into the prime-rl venv so `evaluate` can just
-# shell `python -m pytest` with cwd=<per-rollout worktree>. Each rollout
-# copies from /opt/repo-cache/fastapi into /tmp/rollout-workspace/current
-# via shutil.copytree (see agent/src/agent/async_local_env.py::prepare).
+# Rollout target repo + its own test venv — deliberately ISOLATED from
+# prime-rl's venv. The target is training *data*, not infrastructure:
+# installing it -e into the serving venv clobbered vLLM's own fastapi pin
+# with the target's main HEAD, and every API route 500'd
+# (prometheus-fastapi-instrumentator's `route.path` vs fastapi-main's
+# `_IncludedRouter`). Rollout `evaluate` runs pytest via $SWE_TARGET_PYTHON
+# (see swe_agent_env._task_from_row), so target deps never touch prime-rl's
+# resolver. Each rollout copies /opt/repo-cache/target into
+# /tmp/rollout-workspace/current (agent/src/agent/async_local_env.py::prepare).
 # ---------------------------------------------------------------------------
-# Rollouts only need the working tree at HEAD (copytree per rollout), so a
-# shallow clone drops fastapi's full history. fastapi's version is static
-# (hatch reads __version__), so no git metadata is needed for the -e install.
-RUN git clone --depth 1 https://github.com/fastapi/fastapi.git /opt/repo-cache/fastapi
-# prime-rl's venv is built by `uv sync` which doesn't seed pip, so shell out
-# via `uv pip install --python` the same way the overlay install above does.
-RUN UV_PROJECT=/opt/prime-rl uv pip install \
-        --python /opt/prime-rl/.venv/bin/python \
-        -e /opt/repo-cache/fastapi \
+ARG TARGET_REPO_URL=https://github.com/fastapi/fastapi.git
+# Full clone (NOT shallow/blobless): each rollout runs `git checkout -f
+# <task.base_commit>` (agent/async_local_env.py:53), so every task's
+# historical base commit must be present offline. A --depth 1 clone has only
+# HEAD; a blobless clone would need network mid-rollout.
+RUN git clone "${TARGET_REPO_URL}" /opt/repo-cache/target
+# The trailing dep list is the target's test-runner deps (fastapi's pytest
+# stack for the default target); swap alongside TARGET_REPO_URL.
+RUN uv venv /opt/target-venv --python /usr/bin/python3.12 \
+    && uv pip install --python /opt/target-venv/bin/python \
+        -e /opt/repo-cache/target \
         pytest pytest-asyncio anyio httpx dirty-equals
+ENV SWE_TARGET_PYTHON=/opt/target-venv/bin/python \
+    SWE_TARGET_TEMPLATE=/opt/repo-cache/target
+# Regression guards: the target venv must run pytest standalone, and
+# prime-rl's venv must NOT have picked up the target repo — vLLM's own
+# fastapi pin has to survive (see isolation note above).
+RUN /opt/target-venv/bin/python -m pytest --version \
+    && /opt/prime-rl/.venv/bin/python -c \
+       "import fastapi; assert '/opt/repo-cache' not in fastapi.__file__, fastapi.__file__; print('serving fastapi:', fastapi.__version__)"
 
 # Import-check: verifiers resolves `swe-agent-env` via importlib.import_module,
 # so the module must be at the top level of prime-rl's venv. Fail the build if
