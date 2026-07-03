@@ -591,6 +591,11 @@ branch**. GHA layer cache per image (`scope=<name>`).
   because datagen generates patches itself, but the asymmetry is worth knowing.
 - Training serializes rollouts (one shared workspace + lock); eval parallelizes
   (per-instance workspaces). Same environment class, opposite concurrency models.
-- Eval's `git_mirror_root/<repo_slug>` layout implies multi-repo mirrors, but the
-  image bakes only the fastapi mirror — SWE-bench Verified instances from other
-  repos will fail `prepare` unless their mirrors are added.
+- Eval bakes only the fastapi mirror; cross-repo SWE-bench instances are
+  provisioned on demand by `evaluation/repo_setup.py` (full clone into
+  `/workspace/repo-cache`, per-(repo, commit) test venv into
+  `/workspace/eval-envs`, test command retargeted onto that venv). First contact
+  with a new repo pays a clone+pip cost (can be minutes for heavy repos); caches
+  persist on the volume. Venv builds follow datagen's shadowing recipe, so
+  src/-layout repos may still fail their test run — a counted reward-0, not a
+  crash.

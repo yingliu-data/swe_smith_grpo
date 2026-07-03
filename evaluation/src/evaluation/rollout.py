@@ -12,6 +12,7 @@ from common.reward import DefenseEvent, RewardResult, compute_reward
 from common.tool_surface import ToolSurfaceError, dispatch, parse_tool_call
 
 from .config import EvalConfig
+from .repo_setup import ensure_python, ensure_template, retarget_test_command
 from .sample import EvalInstance
 
 
@@ -88,17 +89,24 @@ async def run_single_rollout(
                   "seed": cfg.seed},
     )
     # Each rollout owns its own scratch dir under rollout_workspace_root, so
-    # parallel rollouts never collide on disk. Template repo is pre-mirrored
-    # into git_mirror_root by the evaluate.Dockerfile.
-    repo_slug = instance.repo.replace("/", "__")
+    # parallel rollouts never collide on disk. The in-distribution target is
+    # pre-mirrored into git_mirror_root by evaluate.Dockerfile; other repos
+    # (SWE-bench Verified spans many) are cloned + venv'd on demand.
+    template = await ensure_template(instance, cfg)
     per_rollout_cwd = cfg.rollout_workspace_root / f"{instance.instance_id}"
     env = AsyncLocalEnvironment(
         workspace_root=per_rollout_cwd,
-        template_path=cfg.git_mirror_root / repo_slug,
+        template_path=template,
         task=task,
         command_timeout_seconds=cfg.max_wall_seconds,
     )
     await env.prepare(test_patch=instance.test_patch)
+    # The prepared workspace sits at base_commit — it doubles as the pip
+    # source for the per-(repo, commit) test venv. Must happen before the
+    # agent loop: the model may call `evaluate` on any turn.
+    python_bin = await ensure_python(
+        instance=instance, cfg=cfg, template=template, repo_dir=per_rollout_cwd)
+    task.test_command = retarget_test_command(task.test_command, python_bin)
 
     history: list[dict[str, str]] = [
         {"role": "system",

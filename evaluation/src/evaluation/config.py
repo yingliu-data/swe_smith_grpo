@@ -36,6 +36,11 @@ class EvalConfig:
     # shadow the clone at runtime.
     git_mirror_root: Path = Path("/opt/repo-cache")
     rollout_workspace_root: Path = Path("/tmp/eval-rollouts")
+    # Cross-repo SWE-bench instances have no baked mirror/venv; repo_setup.py
+    # provisions them on demand, cached on the /workspace volume so re-runs
+    # pay the clone/pip cost once.
+    runtime_mirror_root: Path = Path("/workspace/repo-cache")
+    runtime_envs_root: Path = Path("/workspace/eval-envs")
 
 
 DEFAULT = EvalConfig()
