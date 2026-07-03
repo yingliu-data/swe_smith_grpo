@@ -52,9 +52,13 @@ WORKDIR /opt/prime-rl
 RUN uv sync --extra flash-attn
 
 # ---------------------------------------------------------------------------
-# Our training/agent/common packages are installed editable into prime-rl's
-# venv so verifiers' importlib-based discovery finds `swe_agent_env` when
-# orch.toml names `id = "swe-agent-env"`.
+# Install our `training` package editable into prime-rl's venv so verifiers'
+# importlib-based discovery finds `swe_agent_env` (shipped in training/src)
+# when orch.toml names `id = "swe-agent-env"`. Its `agent`/`common` path deps
+# come in via training's [tool.uv.sources] as non-editable installs — do NOT
+# add a second `-e /app/agent -e /app/common` here: uv 0.11 rejects the same
+# path referenced both editable (the `-e`) and non-editable (common's own
+# source) as conflicting URLs, which breaks the build.
 # ---------------------------------------------------------------------------
 WORKDIR /app
 COPY agent/    /app/agent/
@@ -62,7 +66,7 @@ COPY common/   /app/common/
 COPY training/ /app/training/
 RUN UV_PROJECT=/opt/prime-rl uv pip install \
         --python /opt/prime-rl/.venv/bin/python \
-        -e /app/agent -e /app/common -e /app/training \
+        -e /app/training \
         aiodocker>=0.24 aiofiles>=24.1
 
 # Fail the build loud if flash-attn didn't land. prime-rl's trainer imports
