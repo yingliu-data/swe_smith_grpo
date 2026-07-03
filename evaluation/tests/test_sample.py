@@ -25,26 +25,48 @@ def _write_jsonl(path: Path, rows: list[dict]) -> None:
     path.write_text("\n".join(json.dumps(r) for r in rows))
 
 
-def test_resolve_test_command_prefers_explicit_list():
-    assert _resolve_test_command({"test_command": ["pytest", "-xvs"]}) == ["pytest", "-xvs"]
+# _TARGET_PYTHON is "python" outside the eval image (no SWE_TARGET_PYTHON set);
+# in-image it's the isolated target venv's interpreter. What matters is that
+# every pytest-shaped command is pinned onto it rather than PATH-resolved —
+# bare `pytest` from the eval venv once meant target deps had to pollute the
+# venv that also serves vLLM.
+from evaluation.sample import _TARGET_PYTHON
+
+
+def test_resolve_test_command_pins_explicit_pytest_list():
+    assert _resolve_test_command({"test_command": ["pytest", "-xvs"]}) == \
+        [_TARGET_PYTHON, "-m", "pytest", "-xvs"]
 
 
 def test_resolve_test_command_parses_string_form():
-    assert _resolve_test_command({"test_command": "pytest -x tests/"}) == ["pytest", "-x", "tests/"]
+    assert _resolve_test_command({"test_command": "pytest -x tests/"}) == \
+        [_TARGET_PYTHON, "-m", "pytest", "-x", "tests/"]
+
+
+def test_resolve_test_command_rewrites_foreign_python_bin():
+    # Absolute interpreter paths from the datagen container don't exist here.
+    row = {"test_command": ["/workspace/repos/_envs/x/bin/python", "-m", "pytest", "-x"]}
+    assert _resolve_test_command(row) == [_TARGET_PYTHON, "-m", "pytest", "-x"]
+
+
+def test_resolve_test_command_passes_through_non_interpreter_heads():
+    assert _resolve_test_command({"test_command": ["tox", "-e", "py312"]}) == \
+        ["tox", "-e", "py312"]
 
 
 def test_resolve_test_command_falls_back_to_f2p_nodeids():
     row = {"FAIL_TO_PASS": ["tests/test_a.py::t", "tests/test_b.py::t"]}
-    assert _resolve_test_command(row) == ["pytest", "-x", "tests/test_a.py::t", "tests/test_b.py::t"]
+    assert _resolve_test_command(row) == \
+        [_TARGET_PYTHON, "-m", "pytest", "-x", "tests/test_a.py::t", "tests/test_b.py::t"]
 
 
 def test_resolve_test_command_parses_json_string_f2p():
     row = {"FAIL_TO_PASS": '["tests/test_a.py::t"]'}
-    assert _resolve_test_command(row) == ["pytest", "-x", "tests/test_a.py::t"]
+    assert _resolve_test_command(row) == [_TARGET_PYTHON, "-m", "pytest", "-x", "tests/test_a.py::t"]
 
 
 def test_resolve_test_command_default_when_nothing_specified():
-    assert _resolve_test_command({}) == ["pytest", "-x"]
+    assert _resolve_test_command({}) == [_TARGET_PYTHON, "-m", "pytest", "-x"]
 
 
 def test_load_heldout_jsonl_roundtrip(tmp_path):

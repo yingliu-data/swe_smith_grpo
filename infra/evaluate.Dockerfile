@@ -37,15 +37,26 @@ COPY evaluation/ /app/evaluation/
 WORKDIR /app/evaluation
 RUN uv sync --extra gpu
 
-# Bake the fastapi template + its pytest deps into the eval venv so the
-# rollout's `python -m pytest` finds them when invoked via cwd=<scratch-dir>.
+# Rollout target repo + its own test venv — deliberately ISOLATED from the
+# eval venv. The eval venv carries vLLM, whose API server runs on fastapi;
+# installing the target's main HEAD -e into it replaced vLLM's fastapi pin
+# and 500'd every route (prometheus-fastapi-instrumentator's `route.path` vs
+# fastapi-main's `_IncludedRouter`) — same bug as infra/train.Dockerfile.
+# Rollout pytest runs via $SWE_TARGET_PYTHON (see evaluation/sample.py).
 # Cloned under /opt (not /workspace) so the compose bind mount doesn't shadow
-# the editable-install target at runtime.
+# the clone at runtime; mirror name matches {git_mirror_root}/{repo_slug}.
+# Full clone: rollouts `git checkout -f <base_commit>` historical commits.
 RUN git clone https://github.com/fastapi/fastapi.git /opt/repo-cache/fastapi__fastapi
-RUN uv pip install \
-        --python /app/evaluation/.venv/bin/python \
+RUN uv venv /opt/target-venv --python /usr/bin/python3.12 \
+    && uv pip install --python /opt/target-venv/bin/python \
         -e /opt/repo-cache/fastapi__fastapi \
         pytest pytest-asyncio anyio httpx dirty-equals
+ENV SWE_TARGET_PYTHON=/opt/target-venv/bin/python
+# Regression guards: target venv runs pytest standalone; the eval venv's
+# fastapi (vLLM's dependency) must NOT resolve from /opt/repo-cache.
+RUN /opt/target-venv/bin/python -m pytest --version \
+    && /app/evaluation/.venv/bin/python -c \
+       "import fastapi; assert '/opt/repo-cache' not in fastapi.__file__, fastapi.__file__; print('serving fastapi:', fastapi.__version__)"
 
 ENTRYPOINT ["uv", "run", "evaluate"]
 

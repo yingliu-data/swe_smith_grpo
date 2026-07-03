@@ -4,6 +4,7 @@ import asyncio
 import os
 import signal
 import subprocess
+import sys
 from pathlib import Path
 
 import httpx
@@ -23,7 +24,9 @@ async def launch(checkpoint: Path, cfg: EvalConfig) -> asyncio.subprocess.Proces
     this module.
     """
     cmd = [
-        "python", "-m", "vllm.entrypoints.openai.api_server",
+        # sys.executable (the eval venv, where vLLM lives), never bare
+        # "python": PATH must not decide which venv serves inference.
+        sys.executable, "-m", "vllm.entrypoints.openai.api_server",
         "--model", str(checkpoint),
         "--port", str(cfg.vllm_port),
         "--host", "0.0.0.0",

@@ -1,12 +1,19 @@
 from __future__ import annotations
 
 import json
+import os
 import random
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Literal
 
 Source = Literal["swebench_verified", "heldout"]
+
+# Interpreter for rollout test runs — the baked target venv's python in the
+# eval image (see infra/evaluate.Dockerfile). Bare "python"/"pytest" would
+# PATH-resolve to the eval venv, which must stay free of target-repo deps
+# (installing the target there once broke vLLM's own fastapi).
+_TARGET_PYTHON = os.environ.get("SWE_TARGET_PYTHON", "python")
 
 
 @dataclass(slots=True)
@@ -79,10 +86,10 @@ def _row_to_instance(row: dict, *, source: Source) -> EvalInstance:
 
 def _resolve_test_command(row: dict) -> list[str]:
     cmd = row.get("test_command")
-    if isinstance(cmd, list):
-        return list(cmd)
     if isinstance(cmd, str) and cmd.strip():
-        return cmd.split()
+        cmd = cmd.split()
+    if isinstance(cmd, list) and cmd:
+        return _pin_interpreter(cmd)
     # Fallback: run the F2P tests individually; SWE-bench Verified rows include
     # FAIL_TO_PASS as JSON list of nodeids.
     f2p = row.get("FAIL_TO_PASS") or row.get("fail_to_pass") or []
@@ -92,8 +99,23 @@ def _resolve_test_command(row: dict) -> list[str]:
         except json.JSONDecodeError:
             f2p = [f2p]
     if f2p:
-        return ["pytest", "-x", *f2p]
-    return ["pytest", "-x"]
+        return [_TARGET_PYTHON, "-m", "pytest", "-x", *f2p]
+    return [_TARGET_PYTHON, "-m", "pytest", "-x"]
+
+
+def _pin_interpreter(cmd: list[str]) -> list[str]:
+    """Rewrite an interpreter-shaped command head onto the target venv.
+
+    Dataset rows may carry bare `pytest`/`python` (PATH-resolved: wrong venv)
+    or an absolute python from the datagen container (doesn't exist here).
+    Anything else (e.g. `tox`, `make test`) is passed through untouched.
+    """
+    head = Path(cmd[0]).name
+    if head == "pytest":
+        return [_TARGET_PYTHON, "-m", "pytest", *cmd[1:]]
+    if head in ("python", "python3") or head.startswith("python3."):
+        return [_TARGET_PYTHON, *cmd[1:]]
+    return list(cmd)
 
 
 def mixed_sample(
