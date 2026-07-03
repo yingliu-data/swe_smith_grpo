@@ -13,7 +13,8 @@ FROM nvidia/cuda:12.8.1-devel-ubuntu22.04
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    UV_NO_CACHE=1
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         software-properties-common \
@@ -39,7 +40,10 @@ COPY --from=ghcr.io/astral-sh/uv:0.11 /uv /usr/local/bin/uv
 # Pinned to v0.5.0 tag (63331ad, 2026-03-30).
 # ---------------------------------------------------------------------------
 ARG PRIME_RL_REV=63331ad8b17048b6d5f2051b2bf159e1392924b7
-RUN git clone https://github.com/PrimeIntellect-ai/prime-rl.git /opt/prime-rl \
+# Blobless clone: keeps the full ref/tag graph (so prime-rl's version
+# detection and an arbitrary-SHA checkout still work) but defers file blobs,
+# fetching only those for the checked-out rev — far smaller than a full clone.
+RUN git clone --filter=blob:none https://github.com/PrimeIntellect-ai/prime-rl.git /opt/prime-rl \
     && cd /opt/prime-rl && git checkout "${PRIME_RL_REV}"
 WORKDIR /opt/prime-rl
 # `flash-attn` is an optional extra (prebuilt wheel for cu128/py3.12); prime-rl's
@@ -77,7 +81,10 @@ RUN /opt/prime-rl/.venv/bin/python -c "import flash_attn, ring_flash_attn; print
 # copies from /opt/repo-cache/fastapi into /tmp/rollout-workspace/current
 # via shutil.copytree (see agent/src/agent/async_local_env.py::prepare).
 # ---------------------------------------------------------------------------
-RUN git clone https://github.com/fastapi/fastapi.git /opt/repo-cache/fastapi
+# Rollouts only need the working tree at HEAD (copytree per rollout), so a
+# shallow clone drops fastapi's full history. fastapi's version is static
+# (hatch reads __version__), so no git metadata is needed for the -e install.
+RUN git clone --depth 1 https://github.com/fastapi/fastapi.git /opt/repo-cache/fastapi
 # prime-rl's venv is built by `uv sync` which doesn't seed pip, so shell out
 # via `uv pip install --python` the same way the overlay install above does.
 RUN UV_PROJECT=/opt/prime-rl uv pip install \
