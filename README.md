@@ -189,7 +189,9 @@ docker run --rm \
   --dataset /workspace/datasets/pilot/pilot.jsonl \
   --profile smoke \
   --output-dir /workspace/checkpoints \
-  --sessions-root /workspace/sessions
+  --sessions-root /workspace/sessions \
+
+  --seq-len 4096 --batch-size 8 --max-steps 3
 ```
 
 `--profile smoke` is a fast wiring check; `--profile full` runs the real
@@ -206,6 +208,46 @@ automatically (`--seq-len` and `--max-steps` fan out to both train.toml and
 orch.toml, `--seq-len` is capped at infer max_model_len, and `--batch-size`
 must divide by `--rollouts-per-example`). The patched tomls land in the
 session dir for provenance.
+
+### Running the evaluate image
+
+The evaluate image scores a trained checkpoint on SWE-bench Verified (20
+cross-repo instances) plus the datagen heldout split (10 in-distribution).
+It launches its own vLLM (greedy, prefix caching on), so it needs a **GPU**,
+`--ipc=host` with a large `/dev/shm`, and the `/workspace` mount for the
+checkpoint, heldout data, and provisioning caches. `HF_TOKEN` is recommended
+(SWE-bench Verified downloads from the HF Hub):
+
+```bash
+docker run --rm \
+  --gpus all \
+  --ipc=host --shm-size=8g \
+  -v /workspace:/workspace \
+  -e HF_TOKEN="TOKEN" \
+  -e HF_HOME=/workspace/hf-cache \
+  ghcr.io/yingliu-data/ml-systems-evaluate:latest \
+  --checkpoint /workspace/checkpoints/final \
+  --swebench-n 20 \
+  --heldout /workspace/datasets/pilot/heldout.jsonl \
+  --heldout-n 10 \
+  --sessions-root /workspace/sessions
+```
+
+Point `--checkpoint` at a vLLM-loadable model directory (e.g. the final
+checkpoint exported by training). Useful variants: `--dry-run` prints the
+sampled instance set and exits (no GPU work); `--offline` skips SWE-bench
+and evaluates the heldout split only — no HF download needed.
+
+The fastapi mirror + its test venv are baked into the image; other repos in
+the SWE-bench sample are cloned and given a per-(repo, commit) test venv on
+demand, cached under `/workspace/repo-cache` and `/workspace/eval-envs` —
+the **first** run pays a clone+pip cost per new repo (minutes for heavy
+ones), re-runs hit the cache. Results land in the session dir:
+`logs/results.jsonl` (per-instance) and `logs/summary.json` (per-source
+pass rates, heldout vs Verified kept separate). The final summary also
+prints to stdout as JSON.
+`docker compose -f infra/docker-compose.evaluate.yml up` does the same with
+the GPU reservation and `HF_HOME` preset.
 
 ### Pod provisioning (RunPod)
 
