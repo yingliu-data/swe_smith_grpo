@@ -4,8 +4,7 @@ import json
 import re
 from typing import Any
 
-from agent import ToolCall, ToolResult
-from agent.docker_env import DockerEnvironment
+from agent import Environment, ToolCall, ToolResult
 
 FIXED_TOOL_DEFS: list[dict[str, Any]] = [
     {
@@ -113,7 +112,9 @@ def _parse_json(text: str) -> ToolCall:
     return ToolCall(name=name, arguments=args)
 
 
-async def dispatch(tool_call: ToolCall, env: DockerEnvironment) -> ToolResult:
+async def dispatch(tool_call: ToolCall, env: Environment) -> ToolResult:
+    # Accepts any Environment with an async step(); production uses
+    # AsyncLocalEnvironment, tests exercise DockerEnvironment too.
     if tool_call.name not in VALID_TOOL_NAMES:
         return ToolResult(name=tool_call.name, ok=False, error="tool not in fixed surface")
     return await env.step(tool_call)

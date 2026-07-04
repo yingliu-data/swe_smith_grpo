@@ -14,6 +14,12 @@ class LocalWorkspaceEnvironment(Environment):
 
     Used when no event loop is active. For training/eval rollouts that need async +
     Docker isolation, use DockerEnvironment.
+
+    Deliberately has NO test-glob edit/delete guard (unlike the agent-facing
+    async envs): this env is driven only by datagen's Validator, which applies
+    whole patches it constructed itself via apply_patch_text (path=""), so a
+    path-argument guard would never fire. The read-only-tests defense (#1)
+    belongs to the envs a model can steer.
     """
 
     def __init__(self, workspace_root, command_timeout_seconds: int = 120):

@@ -39,11 +39,3 @@ class EvaluationResult:
     passed: bool
     output: str
     exit_code: int
-
-
-@dataclass(slots=True)
-class StepResult:
-    observation: str
-    reward: float
-    done: bool
-    info: dict[str, Any] = field(default_factory=dict)

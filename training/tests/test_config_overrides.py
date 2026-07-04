@@ -67,6 +67,39 @@ def test_batch_size_must_divide_by_group(tmp_path):
         )
 
 
+async def test_full_profile_geometry_reaches_the_tomls(tmp_path):
+    """--profile full must actually change the schedule prime-rl sees."""
+    import argparse
+
+    from training.train import _run
+
+    args = argparse.Namespace(
+        dataset=tmp_path / "fake.jsonl", profile="full", resume=None,
+        output_dir=tmp_path / "ckpt", sessions_root=tmp_path / "sess",
+        prime_rl="python -c pass",
+        seq_len=None, batch_size=None, rollouts_per_example=None,
+        max_steps=None, max_async_level=None, max_off_policy_steps=None,
+    )
+    assert await _run(args) == 0
+    cfg_dir = next((tmp_path / "sess").glob("train-*/configs"))
+    orch = tomllib.loads((cfg_dir / "orch.toml").read_text())
+    assert (orch["max_steps"], orch["batch_size"], orch["rollouts_per_example"]) == (150, 32, 8)
+    assert tomllib.loads((cfg_dir / "train.toml").read_text())["max_steps"] == 150
+
+
+def test_smoke_profile_matches_baked_tomls():
+    """SMOKE is the wiring check: pushing it must be a no-op vs the baked
+    values, so profile plumbing can't silently change validated smoke runs."""
+    from training.config import SMOKE
+
+    train_toml = _load(CFG_ROOT, "train")
+    orch_toml = _load(CFG_ROOT, "orch")
+    assert SMOKE.max_steps == train_toml["max_steps"] == orch_toml["max_steps"]
+    assert SMOKE.seq_len == train_toml["model"]["seq_len"] == orch_toml["seq_len"]
+    assert SMOKE.batch_size == orch_toml["batch_size"]
+    assert SMOKE.rollouts_per_example == orch_toml["rollouts_per_example"]
+
+
 async def test_run_with_overrides_exercises_full_wrapper(tmp_path):
     """Drive _run end-to-end with a stub prime-rl command.
 

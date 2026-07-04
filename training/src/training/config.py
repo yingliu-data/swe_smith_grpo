@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Literal
 
 Profile = Literal["smoke", "full"]
@@ -11,51 +10,42 @@ _PROFILES: dict[str, "TrainingConfig"] = {}
 
 @dataclass(slots=True)
 class TrainingConfig:
+    """Wrapper-level profile: loop geometry + watchdog policy.
+
+    The geometry fields are pushed into the prime-rl tomls at start-up via
+    train._materialize_configs with precedence CLI flag > profile > baked
+    toml, so `--profile full` genuinely changes the schedule. Everything
+    else (lr, LoRA, ckpt cadence, sampling, GPU budget) lives in
+    configs/*.toml — the single source of truth prime-rl reads.
+    """
+
     profile: Profile
     max_steps: int
     batch_size: int
-    group_size_g: int
-    micro_batch_size: int
-    max_seq_len: int
-    lr: float
-    ckpt_interval: int
-    ckpt_keep_last: int
-    llm_concurrency: int
-    docker_concurrency: int
+    rollouts_per_example: int  # GRPO group size G; must divide batch_size
+    seq_len: int
     heartbeat_stale_seconds: int
-    max_tool_calls: int
 
 
+# Matches the baked tomls exactly — smoke is the fast wiring check.
 SMOKE = TrainingConfig(
     profile="smoke",
-    max_steps=30,
+    max_steps=10,
     batch_size=16,
-    group_size_g=4,
-    micro_batch_size=1,
-    max_seq_len=16384,
-    lr=1e-6,
-    ckpt_interval=10,
-    ckpt_keep_last=3,
-    llm_concurrency=8,
-    docker_concurrency=4,
+    rollouts_per_example=4,
+    seq_len=4096,
     heartbeat_stale_seconds=600,
-    max_tool_calls=20,
 )
 
+# The real schedule. seq_len stays 4096: sized for the 80 GB colocated pod
+# (see train.toml [model] for the memory math).
 FULL = TrainingConfig(
     profile="full",
     max_steps=150,
     batch_size=32,
-    group_size_g=8,
-    micro_batch_size=1,
-    max_seq_len=16384,
-    lr=1e-6,
-    ckpt_interval=25,
-    ckpt_keep_last=3,
-    llm_concurrency=8,
-    docker_concurrency=4,
+    rollouts_per_example=8,
+    seq_len=4096,
     heartbeat_stale_seconds=600,
-    max_tool_calls=20,
 )
 
 _PROFILES["smoke"] = SMOKE

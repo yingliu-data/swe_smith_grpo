@@ -21,13 +21,3 @@ def atomic_write_json(path: Path | str, payload: Any) -> None:
     finally:
         tmp.close()
     os.replace(tmp_name, p)
-
-
-def read_json_once(path: Path | str, *, delete: bool = True) -> Any | None:
-    p = Path(path)
-    if not p.exists():
-        return None
-    data = json.loads(p.read_text())
-    if delete:
-        p.unlink()
-    return data

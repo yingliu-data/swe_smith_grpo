@@ -203,7 +203,9 @@ Loop geometry can be retuned per run without rebuilding the image — append
 any of `--seq-len`, `--batch-size`, `--rollouts-per-example`, `--max-steps`,
 `--max-async-level`, `--max-off-policy-steps` to the `docker run` above
 (e.g. `--seq-len 4096 --batch-size 8 --max-steps 3`). They're applied on top
-of the baked prime-rl tomls at start-up; cross-file invariants are enforced
+of the baked prime-rl tomls at start-up, with precedence CLI flag >
+`--profile` geometry > baked toml (smoke matches the baked tomls; full is
+150 steps / batch 32 / G=8); cross-file invariants are enforced
 automatically (`--seq-len` and `--max-steps` fan out to both train.toml and
 orch.toml, `--seq-len` is capped at infer max_model_len, and `--batch-size`
 must divide by `--rollouts-per-example`). The patched tomls land in the

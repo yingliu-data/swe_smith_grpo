@@ -59,6 +59,20 @@ def _collect_overrides(args: argparse.Namespace) -> dict[str, int]:
     return {k: v for k in _OVERRIDE_KEYS if (v := getattr(args, k)) is not None}
 
 
+def _profile_geometry(profile) -> dict[str, int]:
+    """Loop geometry a --profile contributes to the toml materialization.
+
+    Merged under explicit CLI overrides (CLI flag > profile > baked toml),
+    which is what makes `--profile full` actually run the full schedule.
+    """
+    return {
+        "max_steps": profile.max_steps,
+        "batch_size": profile.batch_size,
+        "rollouts_per_example": profile.rollouts_per_example,
+        "seq_len": profile.seq_len,
+    }
+
+
 def _materialize_configs(cfg_root: Path, out_root: Path, overrides: dict[str, int]) -> Path:
     """Apply run-time overrides on top of the baked prime-rl tomls.
 
@@ -101,7 +115,9 @@ async def _run(args: argparse.Namespace) -> int:
     profile = load_profile(args.profile)
     session = _open_or_create_session(args.sessions_root, args.resume)
     log = RunLogger(session)
-    overrides = _collect_overrides(args)
+    cli_overrides = _collect_overrides(args)
+    # Precedence: explicit CLI flag > profile geometry > baked toml.
+    geometry = {**_profile_geometry(profile), **cli_overrides}
     ticket = log.next_ticket(
         "train.run",
         inputs={
@@ -109,11 +125,12 @@ async def _run(args: argparse.Namespace) -> int:
             "dataset": str(args.dataset),
             "resume": args.resume,
             "output_dir": str(args.output_dir),
-            "overrides": overrides,
+            "overrides": cli_overrides,
+            "geometry": geometry,
         },
     )
     log.trace.log("train.start", profile=profile.profile, dataset=str(args.dataset),
-                  overrides=overrides)
+                  overrides=cli_overrides, geometry=geometry)
 
     cmd_parts = args.prime_rl.split()
     if _prime_rl_missing(cmd_parts):
@@ -128,10 +145,10 @@ async def _run(args: argparse.Namespace) -> int:
         return 127
 
     cfg_root = _materialize_configs(
-        Path(__file__).parent / "configs", session.root / "configs", overrides)
-    if overrides:
-        print(f"[train] config overrides {overrides} -> {cfg_root}",
-              file=sys.stderr, flush=True)
+        Path(__file__).parent / "configs", session.root / "configs", geometry)
+    print(f"[train] loop geometry {geometry} "
+          f"(profile={profile.profile}, cli={cli_overrides}) -> {cfg_root}",
+          file=sys.stderr, flush=True)
     cmd = [
         *cmd_parts,
         "--trainer", f"@{cfg_root / 'train.toml'}",

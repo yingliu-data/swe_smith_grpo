@@ -84,7 +84,6 @@ Value types (`@dataclass(slots=True)`) shared across the system:
 | `ToolCall` | `name, arguments` | A parsed model tool invocation (from `common.tool_surface.parse_tool_call`). |
 | `ToolResult` | `name, ok, output, error, exit_code, path` | Result of one tool step. |
 | `EvaluationResult` | `reward, passed, output, exit_code` | Returned by every `evaluate()`. |
-| `StepResult` | `observation, reward, done, info` | Exported but **unused** (reserved). |
 
 ### `agent/src/agent/environment.py`
 - **`Environment(ABC)`** — `__init__(workspace_root, command_timeout_seconds=120)`;
@@ -174,10 +173,8 @@ Value types (`@dataclass(slots=True)`) shared across the system:
   (datagen writes one record per passing instance).
 
 ### Small modules
-- `ids.py` — `make_session_id(kind)`, `make_ticket_id(seq, op)`, `safe_key`,
-  `short_hash` (unused).
-- `ipc.py` — `atomic_write_json` (temp file + fsync + `os.replace`);
-  `read_json_once` (unused).
+- `ids.py` — `make_session_id(kind)`, `make_ticket_id(seq, op)`, `safe_key`.
+- `ipc.py` — `atomic_write_json` (temp file + fsync + `os.replace`).
 - `logging.py` — **`TraceLogger`**: lock-guarded JSONL appender
   (`{"ts", "event", **fields}`), the structured log used by all pipelines.
 
@@ -362,9 +359,14 @@ training seq_len ≤ infer `max_model_len`; `batch_size % rollouts_per_example =
 All are enforced by `_materialize_configs` when overridden via CLI.
 
 ### Support modules
-- **`config.py`** — `TrainingConfig` + `SMOKE`/`FULL` profiles. Note: `_run` reads
-  only `heartbeat_stale_seconds` (600) and the profile name from this; the numeric
-  hyperparameters that reach prime-rl live in the TOMLs.
+- **`config.py`** — `TrainingConfig` + `SMOKE`/`FULL` profiles: loop geometry
+  (`max_steps, batch_size, rollouts_per_example, seq_len`) plus watchdog policy.
+  The geometry is pushed into the TOMLs at start-up with precedence **CLI flag >
+  profile > baked toml** (`_profile_geometry` + `_materialize_configs`), so
+  `--profile full` genuinely runs the full schedule (150 steps, batch 32, G=8).
+  SMOKE matches the baked TOMLs exactly (asserted by a test), so smoke behavior
+  is identical with or without the profile plumbing. Everything else (lr, LoRA,
+  ckpt cadence) lives only in the TOMLs.
 - **`checkpoint.py`** — `Checkpoint.from_dir` (manifest-hashed), `list_checkpoints`,
   `latest_valid` (newest with clean manifest), `prune_old(keep_last)`.
 - **`watchdog.py`** — `watchdog_loop(heartbeat_path, stale_after_seconds, on_stall)`:
@@ -577,18 +579,19 @@ branch**. GHA layer cache per image (`scope=<name>`).
 
 ## Known quirks
 
-- `agent.models.StepResult`, `common.ids.short_hash`, `common.ipc.read_json_once`
-  have no callers (reserved/dead).
-- `common.tool_surface.dispatch` is type-hinted `DockerEnvironment` but is called
-  with `AsyncLocalEnvironment` everywhere in production.
-- `DockerEnvironment` is fully implemented (network-isolated rollouts) but only
-  exercised by tests; production rollouts are in-process (`AsyncLocalEnvironment`).
-- `training/config.py`'s SMOKE/FULL numeric hyperparameters (steps/batch) are
-  **not** what prime-rl runs — the TOMLs are (only `heartbeat_stale_seconds` and the
-  profile name are read from the profile). The two agree only when `--max-steps`
-  etc. are passed.
-- `LocalWorkspaceEnvironment` (datagen) lacks the test-glob edit block — acceptable
-  because datagen generates patches itself, but the asymmetry is worth knowing.
+Resolved quirks (dead types `StepResult`/`short_hash`/`read_json_once` removed;
+`dispatch` re-hinted to the `Environment` base; profile geometry now actually
+reaches prime-rl) are gone from the code. What remains is intentional:
+
+- **`DockerEnvironment` is kept deliberately** despite production rollouts being
+  in-process (`AsyncLocalEnvironment`). It is the network-isolation upgrade path
+  (reward defense #2 — a container boundary is the only way to enforce it), is
+  test-covered, and `orch.toml`'s ignored legacy `docker_image` arg is its config
+  vestige. Resurrect it if reward hacking via network access becomes a concern.
+- **`LocalWorkspaceEnvironment` has no test-glob guard by design** (documented in
+  its docstring): it is driven only by datagen's Validator, which applies whole
+  patches it constructed itself with `path=""` — a path-argument guard could
+  never fire. Defense #1 lives in the agent-steerable envs.
 - Training serializes rollouts (one shared workspace + lock); eval parallelizes
   (per-instance workspaces). Same environment class, opposite concurrency models.
 - Eval bakes only the fastapi mirror; cross-repo SWE-bench instances are
