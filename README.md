@@ -228,17 +228,31 @@ docker run --rm \
   -e HF_TOKEN="TOKEN" \
   -e HF_HOME=/workspace/hf-cache \
   ghcr.io/yingliu-data/ml-systems-evaluate:latest \
-  --checkpoint /workspace/checkpoints/final \
+  --checkpoint /workspace/checkpoints/train-<run-id>/weights/step_10 \
   --swebench-n 20 \
   --heldout /workspace/datasets/pilot/heldout.jsonl \
   --heldout-n 10 \
   --sessions-root /workspace/sessions
 ```
 
-Point `--checkpoint` at a vLLM-loadable model directory (e.g. the final
-checkpoint exported by training). Useful variants: `--dry-run` prints the
-sampled instance set and exits (no GPU work); `--offline` skips SWE-bench
-and evaluates the heldout split only — no HF download needed.
+**Which checkpoint path?** A training run writes two different trees under
+`/workspace/checkpoints/train-<run-id>/`:
+
+- `weights/step_<N>/` — the **servable model**: a full HF-format export
+  (merged LoRA, `config.json`, tokenizer, sharded safetensors, `STABLE`
+  marker) written at each checkpoint interval. **This is what
+  `--checkpoint` takes.**
+- `checkpoints/step_<N>/trainer/` — trainer **resume state** (a torch
+  distributed `.distcp` blob). vLLM cannot load it; pointing eval here
+  fails with "Invalid repository ID or local directory".
+
+The compose file's `/workspace/checkpoints/final` default is a convention —
+symlink your chosen export to it:
+`ln -sfn /workspace/checkpoints/train-<run-id>/weights/step_10 /workspace/checkpoints/final`.
+
+Useful variants: `--dry-run` prints the sampled instance set and exits (no
+GPU work); `--offline` skips SWE-bench and evaluates the heldout split only
+— no HF download needed.
 
 The fastapi mirror + its test venv are baked into the image; other repos in
 the SWE-bench sample are cloned and given a per-(repo, commit) test venv on

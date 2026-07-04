@@ -489,9 +489,13 @@ setup_facts/}`, session trace, cached clones + `_envs` venvs.
    `_finalise`: apply-check + F2P pytest under `SWE_TARGET_PYTHON` →
    `compute_reward` (drift/apply/tests gates) → rubric reads `reward_value`.
 5. GRPO: 4 rollouts per prompt form a group; group-relative advantage; LoRA update.
-   Trainer writes `step_*/` checkpoints (interval 10, keep 3) and heartbeats
-   `ipc/heartbeat.json`; `watchdog_loop` SIGTERMs on >600 s staleness (exit 42).
-   All prime-rl stdout mirrored into the session trace.
+   Per `[ckpt] interval=10`, the run dir gets two distinct trees:
+   `weights/step_<N>/` — a **full HF-format model export** (merged LoRA,
+   config.json + tokenizer + sharded safetensors, `STABLE` marker; this is what
+   eval's `--checkpoint` takes) — and `checkpoints/step_<N>/trainer/` — torch
+   distributed **resume state** (`.distcp`, not vLLM-loadable). The trainer
+   heartbeats `ipc/heartbeat.json`; `watchdog_loop` SIGTERMs on >600 s staleness
+   (exit 42). All prime-rl stdout mirrored into the session trace.
 
 ### Trace 3 — evaluation run
 
